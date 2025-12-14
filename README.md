@@ -32,7 +32,7 @@ python -m http.server 3000
 - Start: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
 
 ### Netlify (frontend)
-- `netlify.toml` kör `node scripts/gen-config.js` och publicerar `web/`.
+- `netlify.toml` kör `node scripts/verify-web.js && node scripts/gen-config.js` och publicerar `web/`.
 - Sätt env `API_BASE=https://<din-render-app>.onrender.com` i Netlify. Builden failar om den saknas.
 - `scripts/gen-config.js` skriver `web/config.js` med `window.API_BASE = "<API_BASE>"`.
 
@@ -71,3 +71,8 @@ python -m http.server 3000
 - `Session` (program_id, template_id, set_logs[], status)
 - `SetLog` (exercise_id, set_number, weight, reps, rpe, comment)
 - `PersonalBest` (exercise_id, kind, value, reps, date, is_public)
+
+## Netlify post-deploy checklista
+1) `GET /index.html` (200 + HTML, inte 404).  
+2) `GET /app.js` (200 + JavaScript, inte 404).  
+3) `GET /config.js` (200 + innehaller `API_BASE=...`, inte 404).  

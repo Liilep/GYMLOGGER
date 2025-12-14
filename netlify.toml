@@ -1,6 +1,6 @@
 [build]
   publish = "web"
-  command = "node scripts/gen-config.js"
+  command = "node scripts/verify-web.js && node scripts/gen-config.js"
 
 [build.environment]
   NODE_VERSION = "18"

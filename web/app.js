@@ -25,11 +25,15 @@ const state = {
   activeExerciseId: null,
   completedExercises: {},
   restTimer: null, // { total, remaining, deadline }
+  sessionStartedAt: null,
 };
 
 let currentModal = null;
 let authMode = "login";
 let restInterval = null;
+let sessionPersistTimer = null;
+let backNavGuardEnabled = false;
+let restoreApplied = false;
 
 const storedBase = localStorage.getItem("API_BASE") || "";
 let API_BASE = window.API_BASE || storedBase || "";
@@ -39,6 +43,9 @@ const API_CANDIDATES = [
   "http://127.0.0.1:8001",
 ].filter(Boolean);
 let authToken = localStorage.getItem("authToken") || "";
+const ACTIVE_SESSION_STORAGE_KEY = "activeWorkoutSession";
+const SESSION_PERSIST_DEBOUNCE_MS = 300;
+const SESSION_LEAVE_WARNING = "Du har ett pågående pass. Lämnar du sidan kan data gå förlorad.";
 
 async function api(path, options = {}) {
   if (!API_BASE) {
@@ -85,11 +92,14 @@ function logout() {
   authToken = "";
   localStorage.removeItem("authToken");
   clearCompletedExercises(state.activeSession?.id);
+  clearPersistedSessionState(true);
+  disableNavigationGuards();
   exitSessionLockUI();
   clearRestTimer();
   state.sessionLocked = false;
   state.activeExerciseId = null;
   state.completedExercises = {};
+  state.sessionStartedAt = null;
   state.currentUser = null;
   state.programs = [];
   state.templates = [];
@@ -145,6 +155,238 @@ function clearCompletedExercises(sessionId) {
   }
 }
 
+function isSessionActive() {
+  return Boolean(state.activeSession && state.activeSession.status === "in_progress");
+}
+
+function loadPersistedSessionState() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err) {
+    console.warn("Kunde inte läsa sparad session", err);
+    return null;
+  }
+}
+
+function clearPersistedSessionState(finalized = false) {
+  clearTimeout(sessionPersistTimer);
+  sessionPersistTimer = null;
+  restoreApplied = false;
+  try {
+    if (finalized) {
+      localStorage.setItem(
+        ACTIVE_SESSION_STORAGE_KEY,
+        JSON.stringify({ finalized: true, lastUpdatedAt: Date.now() })
+      );
+    } else {
+      localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    }
+  } catch (err) {
+    console.warn("Kunde inte rensa sparad session", err);
+  }
+}
+
+function buildSessionSnapshot() {
+  if (!isSessionActive()) return null;
+  // Persist local-only session state so reload/lock/bfcache can restore safely.
+  return {
+    session: state.activeSession,
+    guide: state.guide,
+    activeExerciseId: state.activeExerciseId,
+    completedExercises: state.completedExercises || {},
+    sessionLocked: state.sessionLocked,
+    currentProgramId: state.currentProgramId,
+    currentTemplateId: state.currentTemplateId,
+    restTimer: state.restTimer ? { ...state.restTimer } : null,
+    startedAt: state.sessionStartedAt || Date.now(),
+    lastUpdatedAt: Date.now(),
+    finalized: false,
+  };
+}
+
+function persistActiveSessionState(immediate = false) {
+  if (!isSessionActive()) {
+    clearPersistedSessionState();
+    return;
+  }
+  const saver = () => {
+    const payload = buildSessionSnapshot();
+    if (!payload) return;
+    try {
+      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(payload));
+    } catch (err) {
+      console.warn("Kunde inte spara aktivt pass", err);
+    }
+  };
+  if (immediate) {
+    clearTimeout(sessionPersistTimer);
+    saver();
+    return;
+  }
+  clearTimeout(sessionPersistTimer);
+  sessionPersistTimer = setTimeout(saver, SESSION_PERSIST_DEBOUNCE_MS);
+}
+
+function showRestoreNotice(message = "", options = {}) {
+  let bar = document.getElementById("sessionRestoreBanner");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "sessionRestoreBanner";
+    bar.style.display = "none";
+    bar.style.margin = "8px 0";
+    bar.style.padding = "10px 12px";
+    bar.style.border = "1px solid #4ade80";
+    bar.style.background = "#102418";
+    bar.style.color = "#c5f4d2";
+    bar.style.borderRadius = "8px";
+    bar.style.gap = "8px";
+    bar.style.alignItems = "center";
+    bar.style.justifyContent = "space-between";
+    bar.style.flexWrap = "wrap";
+    bar.style.fontSize = "14px";
+    bar.style.lineHeight = "1.4";
+    bar.style.boxShadow = "0 4px 14px rgba(0,0,0,0.25)";
+    bar.style.display = "flex";
+    bar.style.flexDirection = "row";
+    const hero = document.querySelector(".hero");
+    if (hero && hero.parentNode) {
+      hero.parentNode.insertBefore(bar, hero.nextSibling);
+    } else {
+      document.body.prepend(bar);
+    }
+  }
+  bar.innerHTML = "";
+  if (!message) {
+    bar.style.display = "none";
+    return;
+  }
+  const text = document.createElement("span");
+  text.textContent = message;
+  bar.appendChild(text);
+  if (options.showResume) {
+    const resumeBtn = document.createElement("button");
+    resumeBtn.type = "button";
+    resumeBtn.className = "btn ghost small";
+    resumeBtn.textContent = "Fortsätt pass";
+    resumeBtn.addEventListener("click", () => {
+      switchTab("tab-pass");
+      const guideEl = document.getElementById("guideStatus");
+      if (guideEl) guideEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    bar.appendChild(resumeBtn);
+  }
+  if (options.showCancel) {
+    const abortBtn = document.createElement("button");
+    abortBtn.type = "button";
+    abortBtn.className = "btn ghost small danger-text";
+    abortBtn.textContent = "Avbryt pass";
+    abortBtn.addEventListener("click", () => cancelSession());
+    bar.appendChild(abortBtn);
+  }
+  bar.style.display = "flex";
+}
+
+function handleBeforeUnload(e) {
+  if (!isSessionActive()) return;
+  e.preventDefault();
+  e.returnValue = SESSION_LEAVE_WARNING;
+  return SESSION_LEAVE_WARNING;
+}
+
+function handlePopState(e) {
+  if (!isSessionActive()) return;
+  const leave = window.confirm(SESSION_LEAVE_WARNING);
+  if (!leave) {
+    try {
+      history.pushState({ sessionGuard: true }, "", window.location.href);
+    } catch (err) {
+      console.warn("Kunde inte återställa history-state", err);
+    }
+    return;
+  }
+  disableNavigationGuards();
+}
+
+function enableNavigationGuards() {
+  window.removeEventListener("beforeunload", handleBeforeUnload);
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  if (!backNavGuardEnabled && window.history && window.history.pushState) {
+    try {
+      history.pushState({ sessionGuard: true }, "", window.location.href);
+      window.addEventListener("popstate", handlePopState);
+      backNavGuardEnabled = true;
+    } catch (err) {
+      console.warn("Kunde inte aktivera back-skydd", err);
+    }
+  }
+}
+
+function disableNavigationGuards() {
+  window.removeEventListener("beforeunload", handleBeforeUnload);
+  if (backNavGuardEnabled) {
+    window.removeEventListener("popstate", handlePopState);
+    backNavGuardEnabled = false;
+  }
+}
+
+function resumeRestTimerFromSaved(rest) {
+  if (!rest) return;
+  const remaining = Math.max(
+    0,
+    Math.ceil(((rest.deadline || Date.now() + (rest.remaining || rest.total || 0) * 1000) - Date.now()) / 1000)
+  );
+  if (!remaining) {
+    clearRestTimer();
+    return;
+  }
+  startRestTimer(remaining);
+}
+
+function restoreActiveSessionFromStorage() {
+  if (restoreApplied) return false;
+  // Reload session UI state from localStorage if a pass was active.
+  const saved = loadPersistedSessionState();
+  if (!saved || saved.finalized) return false;
+  const savedSession = saved.session;
+  if (!savedSession || savedSession.status === "done" || savedSession.status === "cancelled") {
+    clearPersistedSessionState(true);
+    return false;
+  }
+  if (state.activeSession && savedSession.id && Number(state.activeSession.id) !== Number(savedSession.id)) {
+    return false;
+  }
+  if (!state.activeSession && savedSession) {
+    state.activeSession = savedSession;
+    state.sessions = state.sessions || [];
+    if (!state.sessions.some((s) => Number(s.id) === Number(savedSession.id))) {
+      state.sessions.unshift(savedSession);
+    }
+  }
+  if (!isSessionActive()) return false;
+  state.sessionLocked = saved.sessionLocked ?? true;
+  state.hasAnyActiveSessions = true;
+  state.currentProgramId = saved.currentProgramId || state.currentProgramId || savedSession.program_id || "";
+  state.currentTemplateId = saved.currentTemplateId || state.currentTemplateId || savedSession.template_id || "";
+  state.activeExerciseId = saved.activeExerciseId || null;
+  state.completedExercises = saved.completedExercises || {};
+  state.guide = saved.guide || state.guide;
+  state.sessionStartedAt = saved.startedAt || state.sessionStartedAt || Date.now();
+  if (saved.restTimer) {
+    resumeRestTimerFromSaved(saved.restTimer);
+  }
+  restoreApplied = true;
+  enterSessionLockUI();
+  showSelectorArea(false);
+  enableFinish();
+  showRestoreNotice("Återställde pågående pass.", { showResume: true, showCancel: true });
+  enableNavigationGuards();
+  persistActiveSessionState(true);
+  return true;
+}
+
 async function loadData() {
   await detectApiBase();
   await pingApi();
@@ -198,6 +440,18 @@ async function loadData() {
     };
   });
   state.activeSession = state.sessions.find((s) => s.status === "in_progress") || null;
+  restoreActiveSessionFromStorage();
+  if (isSessionActive()) {
+    state.sessionStartedAt =
+      state.sessionStartedAt ||
+      loadPersistedSessionState()?.startedAt ||
+      Date.now();
+    enableNavigationGuards();
+  } else {
+    state.sessionStartedAt = null;
+    showRestoreNotice("");
+    disableNavigationGuards();
+  }
   state.hasAnyActiveSessions = state.sessions.some((s) => s.status === "in_progress");
   if (!state.activeSession) {
     if (!state.currentProgramId && state.programs.length) {
@@ -255,6 +509,7 @@ async function loadData() {
   toggleStartButton();
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode(authMode || "login");
+  persistActiveSessionState();
 }
 
 async function pingApi() {
@@ -498,6 +753,7 @@ function selectExerciseForSession(exerciseId) {
   updateGuideUI(state.guide);
   const row = tpl.exercises[idx];
   prefillLogFields(row, state.guide.setNumber);
+  persistActiveSessionState();
 }
 
 function renderExercises() {
@@ -799,7 +1055,9 @@ function renderActiveSession() {
   if (cancelBtn) cancelBtn.style.display = "inline-flex";
   if (clearRow) clearRow.style.display = state.hasAnyActiveSessions ? "flex" : "none";
   if (clearBtn) clearBtn.disabled = false;
-  label.textContent = `${state.activeSession.template_name} (${state.activeSession.date})`;
+  const elapsed = formatElapsedSince(state.sessionStartedAt);
+  const elapsedText = elapsed ? ` • ${elapsed}` : "";
+  label.textContent = `${state.activeSession.template_name} (${state.activeSession.date})${elapsedText}`;
   state.activeSession.set_logs?.forEach((s) => {
     const ex = state.exercises.find((e) => e.id === s.exercise_id);
     const item = document.createElement("div");
@@ -1143,6 +1401,18 @@ function formatRestTime(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function formatElapsedSince(startTs) {
+  if (!startTs) return "";
+  const diff = Math.max(0, Date.now() - startTs);
+  const totalMins = Math.floor(diff / 60000);
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  const secs = Math.floor((diff % 60000) / 1000);
+  if (hours > 0) return `${hours}h ${String(mins).padStart(2, "0")}m`;
+  if (mins > 0) return `${mins}m ${String(secs).padStart(2, "0")}s`;
+  return `${secs}s`;
+}
+
 function updateRestUI() {
   const box = document.getElementById("restTimerBox");
   const countdown = document.getElementById("restTimerCountdown");
@@ -1167,6 +1437,7 @@ function clearRestTimer() {
   if (state.restTimer) {
     state.restTimer = null;
     updateRestUI();
+    persistActiveSessionState();
   }
 }
 
@@ -1185,6 +1456,7 @@ function startRestTimer(seconds) {
       clearRestTimer();
     }
   }, 500);
+  persistActiveSessionState();
 }
 
 function skipRestTimer() {
@@ -1348,6 +1620,7 @@ async function handlePostSetFlow(tpl, exerciseId) {
       setGuidePosition(tpl, exerciseId, done + 1, false);
       applyGuideToForm();
       renderTemplateExercises(tpl);
+      persistActiveSessionState();
       return;
     }
     state.completedExercises = state.completedExercises || {};
@@ -1365,12 +1638,14 @@ async function handlePostSetFlow(tpl, exerciseId) {
     } else {
       updateGuideUI(null);
     }
+    persistActiveSessionState();
     return;
   }
 
   setGuidePosition(tpl, exerciseId, done + 1, false);
   applyGuideToForm();
   renderTemplateExercises(tpl);
+  persistActiveSessionState();
 }
 
 function updateGuideUI(guide) {
@@ -1414,6 +1689,7 @@ function skipToNextExercise() {
       completed: true,
     };
   }
+  persistActiveSessionState();
 }
 
 // ---------- Actions ----------
@@ -1441,6 +1717,7 @@ async function startSession() {
     });
     state.activeSession = res.session || res;
     state.sessionLocked = true;
+    state.sessionStartedAt = Date.now();
     state.completedExercises = {};
     state.activeExerciseId = null;
     clearCompletedExercises(state.activeSession.id);
@@ -1456,6 +1733,9 @@ async function startSession() {
     enterSessionLockUI();
     renderTemplateExercises(tpl);
     updateGuideUI(state.guide);
+    enableNavigationGuards();
+    persistActiveSessionState(true);
+    showRestoreNotice("");
     await refreshSessions();
   } catch (err) {
     console.error("Start session failed", err);
@@ -1518,6 +1798,7 @@ async function logSet(e) {
     } else {
       clearRestTimer();
     }
+    persistActiveSessionState();
   } catch (err) {
     console.error("Log set failed", err);
     alert("Kunde inte logga set: " + (err.message || err));
@@ -1532,15 +1813,20 @@ async function finishSession() {
   clearCompletedExercises(state.activeSession.id);
   clearRestTimer();
   await api(`/sessions/${state.activeSession.id}/finish`, { method: "POST" });
+  // Closed session: clear persisted state so next start is clean.
+  clearPersistedSessionState(true);
+  disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
   state.activeExerciseId = null;
   state.completedExercises = {};
+  state.sessionStartedAt = null;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
   exitSessionLockUI();
   updateGuideUI(null);
+  showRestoreNotice("");
   await loadData();
 }
 
@@ -1552,46 +1838,66 @@ async function cancelSession() {
   clearCompletedExercises(state.activeSession.id);
   clearRestTimer();
   await api(`/sessions/${state.activeSession.id}/cancel`, { method: "POST" });
+  // Closed session: clear persisted state so next start is clean.
+  clearPersistedSessionState(true);
+  disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
   state.activeExerciseId = null;
   state.completedExercises = {};
+  state.sessionStartedAt = null;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
   exitSessionLockUI();
   updateGuideUI(null);
+  showRestoreNotice("");
   await loadData();
 }
 
 async function clearActiveSessions() {
   const currentId = state.activeSession?.id;
   await api("/sessions/clear-active", { method: "POST" });
+  clearPersistedSessionState(true);
+  disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
   state.activeExerciseId = null;
   clearCompletedExercises(currentId);
   clearRestTimer();
   state.completedExercises = {};
+  state.sessionStartedAt = null;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
   exitSessionLockUI();
   updateGuideUI(null);
+  showRestoreNotice("");
   await loadData();
 }
 
 async function refreshSessions() {
+  const prevStart = state.sessionStartedAt;
   const sessionsRes = await api("/sessions");
   state.sessions = sessionsRes || [];
   state.hasAnyActiveSessions = state.sessions.some((s) => s.status === "in_progress");
   state.activeSession = state.sessions.find((s) => s.status === "in_progress") || state.activeSession;
+  restoreActiveSessionFromStorage();
   if (state.activeSession) {
     state.sessionLocked = true;
+    state.sessionStartedAt =
+      prevStart ||
+      state.sessionStartedAt ||
+      loadPersistedSessionState()?.startedAt ||
+      Date.now();
     enterSessionLockUI();
+    enableNavigationGuards();
   } else {
     state.sessionLocked = false;
     state.activeExerciseId = null;
+    state.sessionStartedAt = null;
+    clearPersistedSessionState();
+    showRestoreNotice("");
     exitSessionLockUI();
   }
   initGuideFromSession();
@@ -1599,6 +1905,7 @@ async function refreshSessions() {
   setLogExerciseOptions();
   renderSessionHistory();
   applyGuideToForm();
+  persistActiveSessionState();
 }
 
 async function refreshSocial() {
@@ -2574,6 +2881,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode("login");
   updateRestUI();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      persistActiveSessionState(true);
+    }
+  });
+  window.addEventListener("pagehide", () => persistActiveSessionState(true));
+  window.addEventListener("pageshow", () => {
+    if (restoreActiveSessionFromStorage()) {
+      renderActiveSession();
+      applyGuideToForm();
+    }
+  });
   try {
     await loadData();
   } catch (err) {

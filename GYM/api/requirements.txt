@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-sqlmodel
-passlib
-python-jose
-psycopg[binary]

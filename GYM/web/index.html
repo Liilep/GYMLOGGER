@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gym Logg</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero slim">
+        <div class="brand">Gym Logg</div>
+        <div class="hero-actions">
+          <div id="apiStatus" class="status-indicator" aria-label="API-status">?</div>
+          <div class="session-chip" id="sessionChip">
+            <div class="tiny" id="sessionUser">Inte inloggad</div>
+            <button class="btn ghost tiny" id="logoutBtn" type="button">Logga ut</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="card" id="authCard">
+        <div class="row space">
+          <div>
+            <label class="label">Logga in / Registrera</label>
+            <button class="info-btn" type="button" data-info-toggle="info-auth">i</button>
+            <div class="info-note" id="info-auth">Registrering skapar användare och loggar in direkt.</div>
+          </div>
+          <div class="row compact">
+            <button class="btn ghost" id="loginBtn" type="button">Logga in</button>
+            <button class="btn primary" id="registerBtn" type="button">Skapa konto</button>
+          </div>
+        </div>
+        <div class="two">
+          <input id="authUsername" placeholder="Användarnamn" />
+          <input id="authPassword" placeholder="Lösenord" type="password" />
+        </div>
+        <div class="two auth-extra" id="authEmailWrap" style="display:none;">
+          <input id="authEmail" placeholder="E-post (för registrering)" />
+        </div>
+        <div class="auth-extra" id="authDisplayWrap" style="display:none;">
+          <input id="authDisplayName" placeholder="Namn (för registrering)" />
+        </div>
+        <div class="muted tiny" id="authStatus">Inte inloggad</div>
+      </section>
+
+      <div id="appMain" style="display:none;">
+        <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-pass">Träna</button>
+        <button class="tab-btn" data-tab="tab-exercises">Övningar</button>
+        <button class="tab-btn" data-tab="tab-programs">Program</button>
+        <button class="tab-btn" data-tab="tab-templates">Passmallar</button>
+        <button class="tab-btn" data-tab="tab-pb">PB & historik</button>
+        <button class="tab-btn" data-tab="tab-social">Vänner</button>
+      </div>
+
+      <div id="tab-pass" class="tab-panel active">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Välj program & passmall</label>
+              <button class="info-btn" type="button" data-info-toggle="info-pass">i</button>
+              <div class="info-note" id="info-pass">1) Välj program, 2) Välj passmall, 3) Starta. Passet låser till övningarna i mallen.</div>
+            </div>
+            <div class="row compact">
+              <button id="startSessionBtn" class="btn primary">Starta pass</button>
+              <button id="finishSessionBtn" class="btn ghost" style="display:none;">Avsluta pass</button>
+              <button id="cancelSessionBtn" class="btn ghost danger-text" style="display:none;">Avbryt pass</button>
+            </div>
+          </div>
+          <div class="row compact" id="clearActiveRow" style="display:none;">
+            <button id="clearActiveBtn" class="btn ghost">Rensa pågående pass</button>
+            <p class="muted tiny">Det fanns pågående pass. Rensa för att kunna starta nytt.</p>
+          </div>
+          <div class="select-grid">
+            <div>
+              <label class="label">Program</label>
+              <select id="programSelect"></select>
+            </div>
+            <div>
+              <label class="label">Passmall</label>
+              <select id="templateSelect"></select>
+            </div>
+          </div>
+          <div class="muted" id="programName">–</div>
+          <p class="muted tiny" id="startHint">Välj en passmall med minst en övning för att kunna starta.</p>
+          <div class="row compact">
+            <button class="info-btn" type="button" data-info-toggle="info-locked-list">i</button>
+            <div class="info-note" id="info-locked-list">
+              Övningslistan nedan är låst för passet. Redigera i fliken Passmallar.
+            </div>
+          </div>
+          <div id="templateExercises" class="grid" style="margin-top:12px;"></div>
+        </section>
+
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Logga set</label>
+              <button class="info-btn" type="button" data-info-toggle="info-log">i</button>
+              <div class="info-note" id="info-log">
+                Logga set mot den valda passmallen. Guiden visar nästa planerade set.
+              </div>
+          <div class="muted" id="activeSessionLabel">Ingen aktiv session</div>
+          <div class="muted" id="guideStatus">Välj passmall och starta pass.</div>
+        </div>
+        <button id="nextExerciseBtn" class="btn ghost" type="button">Nästa övning</button>
+      </div>
+      <div id="restTimerBox" class="rest-timer" style="display:none;">
+        <div>
+          <div class="muted tiny">Planerad vila</div>
+          <div class="rest-count"><span id="restTimerCountdown">00:00</span></div>
+        </div>
+        <button id="restSkipBtn" type="button" class="btn ghost small">Hoppa över vila</button>
+      </div>
+      <form id="logForm" class="log-form" style="display:none;">
+        <div class="field">
+          <label>Övning (låst till vald mall)</label>
+          <select id="logExercise"></select>
+        </div>
+            <div class="field two">
+              <div>
+                <label>Set</label>
+                <input type="number" id="logSet" min="1" value="1" />
+              </div>
+              <div>
+                <label>Vikt (kg)</label>
+                <input type="number" id="logWeight" min="0" step="0.5" />
+              </div>
+            </div>
+            <div class="field two">
+              <div>
+                <label>Reps</label>
+                <input type="number" id="logReps" min="1" />
+              </div>
+              <div>
+                <label>RPE</label>
+                <input type="number" id="logRpe" min="0" max="10" step="0.5" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Kommentar</label>
+              <input type="text" id="logComment" placeholder="Kändes..." />
+            </div>
+            <button type="submit" class="btn primary full">Lägg till set</button>
+          </form>
+          <div id="setLogList" class="list"></div>
+        </section>
+      </div>
+
+      <div id="tab-exercises" class="tab-panel">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Skapa ny övning</label>
+              <button class="info-btn" type="button" data-info-toggle="info-ex-create">i</button>
+              <div class="info-note" id="info-ex-create">Lägg till övning innan du bygger passmall.</div>
+            </div>
+          </div>
+          <form id="newExerciseForm" class="stack">
+            <input id="exName" placeholder="Namn (t.ex. Bänkpress)" required />
+            <input id="exMuscle" placeholder="Muskelgrupp (Bröst/Ben...)" required />
+            <input id="exType" placeholder="Typ (styrka/kondition)" value="styrka" />
+            <input id="exEquip" placeholder="Utrustning (skivstång/hantlar/...)" />
+            <input id="exNotes" placeholder="Noteringar" />
+            <button class="btn primary full" type="submit">Lägg till övning</button>
+          </form>
+        </section>
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Övningslista</label>
+              <p class="muted">Redigera eller ta bort.</p>
+            </div>
+          </div>
+          <div id="exerciseList" class="list"></div>
+        </section>
+      </div>
+
+      <div id="tab-programs" class="tab-panel">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Skapa program</label>
+              <button class="info-btn" type="button" data-info-toggle="info-program">i</button>
+              <div class="info-note" id="info-program">Skapa program först, koppla passmallar i nästa flik.</div>
+            </div>
+          </div>
+          <form id="newProgramForm" class="stack">
+            <input id="prName" placeholder="Programnamn" required />
+            <input id="prDesc" placeholder="Beskrivning" />
+            <button class="btn primary full" type="submit">Skapa program</button>
+          </form>
+        </section>
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Programlista</label>
+              <p class="muted">Redigera eller ta bort.</p>
+            </div>
+          </div>
+          <div id="programList" class="list"></div>
+        </section>
+      </div>
+
+      <div id="tab-templates" class="tab-panel">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Hantera pass</label>
+              <button class="info-btn" type="button" data-info-toggle="info-templates">i</button>
+              <div class="info-note" id="info-templates">Välj läge: skapa nytt pass eller lägg övning i befintligt.</div>
+            </div>
+            <div class="row compact">
+              <button type="button" id="templateModePass" class="btn ghost">Skapa pass</button>
+              <button type="button" id="templateModeExercise" class="btn ghost">Lägg övning i pass</button>
+            </div>
+          </div>
+          <div id="passFormWrap" class="stack" style="margin-top:12px;">
+            <label class="label">Skapa pass</label>
+            <select id="tplProgram"></select>
+            <input id="tplName" placeholder="Passnamn (t.ex. Måndag - Överkropp)" required />
+            <button class="btn ghost full" type="button" id="createTemplateBtn">Skapa pass</button>
+          </div>
+          <div id="exerciseFormWrap" class="stack" style="margin-top:12px; display:none;">
+            <label class="label">Lägg övning i pass</label>
+            <select id="rowProgram"></select>
+            <select id="rowTemplate"></select>
+            <select id="rowExercise" aria-label="Övning" data-placeholder="Sök eller välj övning"></select>
+            <input id="rowSets" placeholder="Set (t.ex. 4)" />
+            <input id="rowReps" placeholder="Reps (t.ex. 6-8)" />
+            <input id="rowWeight" placeholder="Planerad vikt (t.ex. 70kg eller 75%)" />
+            <input id="rowRpe" placeholder="RPE" />
+            <input id="rowRest" placeholder="Vila (t.ex. 2-3m)" />
+            <input id="rowComment" placeholder="Kommentar" />
+            <button class="btn ghost full" type="button" id="addRowBtn">Lägg till övning</button>
+          </div>
+        </section>
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Översikt: välj program</label>
+              <p class="muted">Visa pass och övningar i valt program.</p>
+            </div>
+            <select id="overviewProgramSelect"></select>
+          </div>
+          <div id="templateList" class="list"></div>
+        </section>
+      </div>
+
+      <div id="tab-pb" class="tab-panel">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Personbästa</label>
+              <button class="info-btn" type="button" data-info-toggle="info-pb">i</button>
+              <div class="info-note" id="info-pb">Filtrera på övning/reps. PB beräknas när du avslutar pass.</div>
+            </div>
+            <div class="row compact">
+              <select id="pbExerciseFilter"></select>
+              <input id="pbRepsFilter" type="number" min="0" placeholder="Reps" style="width:110px;" />
+              <button type="button" class="btn ghost" id="pbFilterBtn">Filtrera</button>
+              <button type="button" class="btn ghost" id="pbClearBtn">Rensa</button>
+            </div>
+          </div>
+          <div id="pbList" class="list"></div>
+        </section>
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Historik</label>
+              <button class="info-btn" type="button" data-info-toggle="info-history">i</button>
+              <div class="info-note" id="info-history">Senaste loggade pass. Klicka för detaljer eller ta bort.</div>
+            </div>
+          </div>
+          <div id="historyList" class="list"></div>
+        </section>
+      </div>
+
+      <div id="tab-social" class="tab-panel">
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Vän-förfrågan</label>
+              <p class="muted">Skicka via användarnamn.</p>
+            </div>
+          </div>
+          <div class="row compact">
+            <input id="friendUsernameInput" placeholder="anvandarnamn" />
+            <button class="btn primary" id="sendFriendRequestBtn" type="button">Skicka förfrågan</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Förfrågningar</label>
+              <p class="muted">Godkänn eller avvisa.</p>
+            </div>
+          </div>
+          <div class="two">
+            <div>
+              <div class="title tiny">Inkommande</div>
+              <div id="incomingRequests" class="list"></div>
+            </div>
+            <div>
+              <div class="title tiny">Skickade</div>
+              <div id="outgoingRequests" class="list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Vänner</label>
+              <p class="muted">Välj för att se publicerat innehåll.</p>
+            </div>
+            <div class="row compact">
+              <input id="viewUserInput" placeholder="Visa användare (username)" />
+              <button class="btn ghost" id="viewUserBtn" type="button">Visa</button>
+            </div>
+          </div>
+          <div id="friendsList" class="list"></div>
+        </section>
+
+        <section class="card">
+          <div class="row space">
+            <div>
+              <label class="label">Publicerat innehåll</label>
+              <p class="muted" id="publicViewLabel">Välj en användare för att se publika program och PBs.</p>
+            </div>
+          </div>
+          <div id="publicPrograms" class="list"></div>
+          <div id="publicPBs" class="list"></div>
+        </section>
+      </div>
+      </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

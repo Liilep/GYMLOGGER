@@ -1,0 +1,11 @@
+[build]
+  publish = "web"
+  command = "node scripts/gen-config.js"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

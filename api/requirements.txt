@@ -4,3 +4,4 @@ sqlmodel
 passlib
 python-jose
 psycopg[binary]
+python-multipart

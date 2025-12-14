@@ -46,9 +46,14 @@ def on_startup():
     init_db()
 
 
-@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"], operation_id="health_check")
 def health():
     return {"ok": True}
+
+
+@app.get("/")
+def index():
+    return {"message": "Welcome to Gym App API. See /docs for docs and /health for status."}
 
 
 class RegisterPayload(SQLModel):

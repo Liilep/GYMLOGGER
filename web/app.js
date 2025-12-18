@@ -1801,6 +1801,19 @@ function getPlannedSets(row) {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
+function getPlannedValueForSet(row, field, setNumber = 1) {
+  if (!row) return "";
+  const raw = row ? row[field] : "";
+  if (raw === undefined || raw === null) return "";
+  const parts = String(raw)
+    .split(/[,;/\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parts.length) return String(raw);
+  const idx = Math.min(Math.max((setNumber || 1) - 1, 0), parts.length - 1);
+  return parts[idx];
+}
+
 function getTemplateRowForExercise(exerciseId, tpl = getCurrentTemplateForLogging()) {
   if (!tpl) return null;
   return getSessionExerciseRows(tpl).find((r) => Number(r.exercise_id) === Number(exerciseId)) || null;
@@ -1919,8 +1932,8 @@ function prefillLogFields(row, setNumber = 1) {
   if (!row) return;
   const weightEl = document.getElementById("logWeight");
   const repsEl = document.getElementById("logReps");
-  const plannedWeight = row.planned_weight ?? "";
-  const plannedReps = row.reps ?? "";
+  const plannedWeight = getPlannedValueForSet(row, "planned_weight", setNumber);
+  const plannedReps = getPlannedValueForSet(row, "reps", setNumber);
   if (weightEl && (setNumber <= 1 || !weightEl.value)) {
     weightEl.value = plannedWeight;
   }
@@ -2252,6 +2265,17 @@ async function logSet(e) {
     await api(`/sessions/${state.activeSession.id}/log-set`, {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+    const plannedRow = tpl ? getTemplateRowForExercise(payload.exercise_id, tpl) : null;
+    const dbgWeight = getPlannedValueForSet(plannedRow, "planned_weight", payload.set_number);
+    const dbgReps = getPlannedValueForSet(plannedRow, "reps", payload.set_number);
+    console.debug("logSet", {
+      exerciseId: payload.exercise_id,
+      setNumber: payload.set_number,
+      plannedWeight: dbgWeight,
+      plannedReps: dbgReps,
+      loggedWeight: payload.weight,
+      loggedReps: payload.reps,
     });
     document.getElementById("logForm").reset();
     await refreshSessions();

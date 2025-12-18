@@ -10,7 +10,22 @@
   --radius: 16px;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
   --notice: #122038;
+  --bg-gradient: radial-gradient(circle at 20% 20%, #1b2a4a, #0a0f1f 50%), #0a0f1f;
   font-family: "Montserrat", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --muted: #4b5568;
+  --accent: #2e7d6d;
+  --accent-2: #4b7bec;
+  --line: #d7e3f5;
+  --text: #0c1424;
+  --danger: #c0392b;
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+  --notice: #eef3ff;
+  --bg-gradient: linear-gradient(180deg, #f7f9fe, #edf2fb 40%, #e7eefc);
 }
 
 *,
@@ -50,7 +65,7 @@ button {
 
 body {
   margin: 0;
-  background: radial-gradient(circle at 20% 20%, #1b2a4a, #0a0f1f 50%), #0a0f1f;
+  background: var(--bg-gradient);
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
@@ -674,7 +689,7 @@ select {
   gap: 14px;
   padding: 14px 16px;
   border-radius: 14px;
-  background: #0e172b;
+  background: var(--card);
   border: 1px solid var(--line);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   max-width: 420px;
@@ -707,4 +722,76 @@ select {
   to {
     transform: rotate(360deg);
   }
+}
+
+[data-theme="light"] body {
+  color: var(--text);
+}
+
+[data-theme="light"] .hero {
+  background: linear-gradient(135deg, #dfe8fb, #f5f8ff);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+[data-theme="light"] .session-chip {
+  background: #f1f5ff;
+  border-color: var(--line);
+}
+
+[data-theme="light"] .tab-btn {
+  background: #eef3ff;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+[data-theme="light"] .tab-btn.active {
+  color: #0c1424;
+  background: linear-gradient(135deg, var(--accent-2), #a5d8ff);
+}
+
+[data-theme="light"] .card,
+[data-theme="light"] .list-item,
+[data-theme="light"] .exercise-card,
+[data-theme="light"] .template-row,
+[data-theme="light"] .rest-timer,
+[data-theme="light"] .notice,
+[data-theme="light"] .modal,
+[data-theme="light"] .overlay-content {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+[data-theme="light"] .exercise-card.session-exercise.done {
+  background: rgba(46, 125, 109, 0.08);
+  border-color: rgba(46, 125, 109, 0.5);
+}
+
+[data-theme="light"] input,
+[data-theme="light"] select {
+  background: #f7f9ff;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+[data-theme="light"] .btn {
+  background: #e8eefc;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+[data-theme="light"] .btn.primary {
+  color: #041025;
+}
+
+[data-theme="light"] .action-btn {
+  background: #e8eefc;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+[data-theme="light"] .app-overlay {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(6px);
 }

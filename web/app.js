@@ -28,6 +28,7 @@ const state = {
   sessionStartedAt: null,
   restoredWorkout: false,
   workoutFocusMode: false,
+  extraExercises: [],
 };
 
 let currentModal = null;
@@ -53,8 +54,10 @@ let authToken = localStorage.getItem("authToken") || "";
 const ACTIVE_SESSION_STORAGE_KEY = "activeWorkoutSession";
 const SESSION_PERSIST_DEBOUNCE_MS = 300;
 const SESSION_LEAVE_WARNING = "Du har ett pågående pass. Lämnar du sidan kan data gå förlorad.";
+const THEME_KEY = "appTheme";
 let apiReady = false;
 let apiReadyPromise = null;
+let currentTheme = localStorage.getItem(THEME_KEY) || "dark";
 
 async function api(path, options = {}) {
   await waitForApiReady();
@@ -125,6 +128,7 @@ function logout() {
   state.sessionStartedAt = null;
   state.restoredWorkout = false;
   state.workoutFocusMode = false;
+  state.extraExercises = [];
   state.currentUser = null;
   state.programs = [];
   state.templates = [];
@@ -202,6 +206,7 @@ function clearPersistedSessionState(finalized = false) {
   restoreApplied = false;
   state.restoredWorkout = false;
   state.workoutFocusMode = false;
+  state.extraExercises = [];
   try {
     if (finalized) {
       localStorage.setItem(
@@ -224,6 +229,7 @@ function buildSessionSnapshot() {
     guide: state.guide,
     activeExerciseId: state.activeExerciseId,
     workoutFocusMode: state.workoutFocusMode,
+    extraExercises: state.extraExercises || [],
     completedExercises: state.completedExercises || {},
     sessionLocked: state.sessionLocked,
     currentProgramId: state.currentProgramId,
@@ -400,7 +406,8 @@ function getActiveExerciseRow() {
   if (!state.activeSession) return null;
   const tpl = state.templates.find((t) => t.id === state.activeSession.template_id);
   if (!tpl) return null;
-  return tpl.exercises.find((r) => Number(r.exercise_id) === Number(state.activeExerciseId)) || null;
+  const rows = getSessionExerciseRows(tpl);
+  return rows.find((r) => Number(r.exercise_id) === Number(state.activeExerciseId)) || null;
 }
 
 function updateFocusModeUI(rowOverride = null) {
@@ -421,8 +428,9 @@ function updateFocusModeUI(rowOverride = null) {
   const done = row ? counts[Number(row.exercise_id)] || 0 : 0;
   const planned = row ? getPlannedSets(row) : 0;
   const restText = row?.rest ? `• Vila ${row.rest}` : "";
+  const freeText = row?.isExtra ? "• Fri" : "";
   info.textContent = row
-    ? `${ex?.name || "Övning"} • Set ${done + 1}${planned ? `/${planned}` : ""} ${restText}`
+    ? `${ex?.name || "Övning"} • Set ${done + 1}${planned ? `/${planned}` : ""} ${freeText} ${restText}`
     : "Fokusläge";
   info.style.display = "block";
 }
@@ -435,13 +443,18 @@ function enterFocusMode(row = null, { scroll = true } = {}) {
   persistActiveSessionState();
 }
 
-function exitFocusMode(scroll = false) {
-  if (!state.workoutFocusMode) {
-    if (scroll) scrollToExerciseSelector();
-    return;
+function exitFocusMode(scroll = false, clearSelection = false) {
+  if (clearSelection) {
+    state.activeExerciseId = null;
+    state.guide = null;
   }
   state.workoutFocusMode = false;
   updateFocusModeUI();
+  if (clearSelection) {
+    const tpl = getCurrentTemplateForLogging();
+    renderTemplateExercises(tpl);
+    applyGuideToForm();
+  }
   if (scroll) scrollToExerciseSelector();
   persistActiveSessionState();
 }
@@ -482,6 +495,21 @@ function disableZoom() {
     },
     { passive: false }
   );
+}
+
+function applyTheme(theme = "dark") {
+  currentTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", currentTheme);
+  localStorage.setItem(THEME_KEY, currentTheme);
+  const btn = document.getElementById("themeToggle");
+  if (btn) {
+    btn.textContent = currentTheme === "light" ? "Mörkt läge" : "Ljust läge";
+  }
+}
+
+function toggleTheme() {
+  const next = currentTheme === "light" ? "dark" : "light";
+  applyTheme(next);
 }
 
 function showRestoreNotice(message = "", options = {}) {
@@ -647,6 +675,7 @@ function restoreActiveSessionFromStorage(markRestored = false) {
     resumeRestTimerFromSaved(saved.restTimer);
   }
   state.workoutFocusMode = saved.workoutFocusMode ?? Boolean(state.activeExerciseId || saved.restTimer);
+  state.extraExercises = saved.extraExercises || [];
   restoreApplied = true;
   if (markRestored) {
     state.restoredWorkout = true;
@@ -763,6 +792,7 @@ async function loadData(options = {}) {
   } else {
     state.sessionLocked = false;
     state.activeExerciseId = null;
+    state.extraExercises = [];
     exitSessionLockUI();
     showSelectorArea(true);
     hideLogForm();
@@ -967,13 +997,14 @@ function renderTemplateExercises(tpl) {
     container.innerHTML = '<div class="empty muted">Välj ett program och en passmall.</div>';
     return;
   }
-  if (!tpl.exercises.length) {
+  const rows = getSessionExerciseRows(tpl);
+  if (!rows.length) {
     container.innerHTML = '<div class="empty muted">Inga övningar i den här mallen. Lägg till i fliken Passmallar.</div>';
     return;
   }
   const inSession = state.sessionLocked && state.activeSession && Number(tpl.id) === Number(state.activeSession.template_id);
   const counts = inSession ? getExerciseLogCounts(state.activeSession) : {};
-  tpl.exercises.forEach((row, idx) => {
+  rows.forEach((row, idx) => {
     const div = document.createElement("div");
     const doneCount = counts[Number(row.exercise_id)] || 0;
     const planned = getPlannedSets(row);
@@ -995,10 +1026,14 @@ function renderTemplateExercises(tpl) {
         }</span>`
       : '<span class="pill subtle">Planerat</span>';
     const progress = inSession ? `<div class="meta">Loggade set: ${doneCount} / ${planned}</div>` : "";
+    const freeBadge = row.isExtra ? '<span class="pill accent">Fri</span>' : "";
     div.innerHTML = `
       <div class="row space">
         <h3>${idx + 1}. ${row.exercise_name || "Övning"}</h3>
-        ${statusLabel}
+        <div class="row compact">
+          ${freeBadge}
+          ${statusLabel}
+        </div>
       </div>
       <div class="tags">
         <span class="tag">Set ${row.planned_sets || "-"}</span>
@@ -1021,7 +1056,8 @@ function selectExerciseForSession(exerciseId) {
   const tpl = state.templates.find((t) => t.id === state.activeSession.template_id);
   if (!tpl) return;
   if (state.completedExercises[exerciseId]) return;
-  const idx = tpl.exercises.findIndex((r) => Number(r.exercise_id) === Number(exerciseId));
+  const rows = getSessionExerciseRows(tpl);
+  const idx = rows.findIndex((r) => Number(r.exercise_id) === Number(exerciseId));
   if (idx === -1) return;
   clearRestTimer();
   state.activeExerciseId = Number(exerciseId);
@@ -1032,9 +1068,9 @@ function selectExerciseForSession(exerciseId) {
   showLogForm();
   renderTemplateExercises(tpl);
   updateGuideUI(state.guide);
-  const row = tpl.exercises[idx];
+  const row = rows[idx];
   prefillLogFields(row, state.guide.setNumber);
-   enterFocusMode(row);
+  enterFocusMode(row);
   persistActiveSessionState();
 }
 
@@ -1043,19 +1079,112 @@ function renderExercises() {
   renderProgramSelects();
 }
 
+function getAvailableFreeExercises(tpl = getCurrentTemplateForLogging()) {
+  const blocked = new Set();
+  if (tpl) {
+    (tpl.exercises || []).forEach((r) => blocked.add(Number(r.exercise_id)));
+  }
+  (state.extraExercises || []).forEach((r) => blocked.add(Number(r.exercise_id)));
+  return (state.exercises || []).filter((ex) => !blocked.has(Number(ex.id)));
+}
+
+function addFreeExercise(exerciseId) {
+  if (!state.activeSession) {
+    alert("Starta ett pass först.");
+    return;
+  }
+  const tpl = getCurrentTemplateForLogging();
+  if (!tpl) {
+    alert("Välj passmall först.");
+    return;
+  }
+  const idNum = Number(exerciseId);
+  if (!idNum) return;
+  if (!Array.isArray(state.extraExercises)) state.extraExercises = [];
+  if (state.extraExercises.some((r) => Number(r.exercise_id) === idNum)) {
+    selectExerciseForSession(idNum);
+    return;
+  }
+  if ((tpl.exercises || []).some((r) => Number(r.exercise_id) === idNum)) {
+    selectExerciseForSession(idNum);
+    return;
+  }
+  const ex = state.exercises.find((e) => Number(e.id) === idNum);
+  state.extraExercises.push({ exercise_id: idNum, exercise_name: ex?.name || "" });
+  renderTemplateExercises(tpl);
+  setLogExerciseOptions();
+  selectExerciseForSession(idNum);
+  persistActiveSessionState(true);
+}
+
+function openFreeExercisePicker() {
+  if (!state.activeSession) {
+    alert("Starta ett pass först.");
+    return;
+  }
+  const options = getAvailableFreeExercises();
+  if (!options.length) {
+    alert("Inga fler övningar att lägga till.");
+    return;
+  }
+  closeModal();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const selectOptions = options
+    .map((ex) => `<option value="${ex.id}">${ex.name}</option>`)
+    .join("");
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Lägg till fri övning</h3>
+        <button type="button" class="btn ghost small" data-modal-close>Stäng</button>
+      </div>
+      <form class="stack">
+        <div class="field">
+          <label>Övning</label>
+          <select id="freeExerciseSelect">${selectOptions}</select>
+        </div>
+        <div class="row space">
+          <div></div>
+          <button type="submit" class="btn primary">Lägg till</button>
+        </div>
+      </form>
+    </div>
+  `;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.dataset.modalClose !== undefined) {
+      closeModal();
+    }
+  });
+  const form = overlay.querySelector("form");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const select = overlay.querySelector("#freeExerciseSelect");
+    const val = select ? select.value : "";
+    if (val) {
+      addFreeExercise(Number(val));
+    }
+    closeModal();
+  });
+  document.body.appendChild(overlay);
+  currentModal = overlay;
+  const sel = overlay.querySelector("#freeExerciseSelect");
+  if (sel) sel.focus();
+}
+
 function setLogExerciseOptions() {
   const sel = document.getElementById("logExercise");
   if (!sel) return;
   sel.innerHTML = "";
   const tpl = getCurrentTemplateForLogging();
-  const list = tpl ? tpl.exercises : [];
+  const list = tpl ? getSessionExerciseRows(tpl) : [];
   sel.disabled = !list.length;
   if (tpl && list.length) {
     list.forEach((row) => {
       const ex = state.exercises.find((e) => e.id === row.exercise_id);
       const opt = document.createElement("option");
       opt.value = row.exercise_id;
-      opt.textContent = ex?.name || row.exercise_id;
+      opt.textContent = `${ex?.name || row.exercise_id}${row.isExtra ? " (Fri)" : ""}`;
       sel.appendChild(opt);
     });
     if (!sel.value && list[0]) {
@@ -1314,6 +1443,7 @@ function renderActiveSession() {
   const clearRow = document.getElementById("clearActiveRow");
   const clearBtn = document.getElementById("clearActiveBtn");
   const cancelBtn = document.getElementById("cancelSessionBtn");
+  const freeRow = document.getElementById("freeExerciseRow");
   if (!label || !list) return;
   list.innerHTML = "";
   if (!state.activeSession) {
@@ -1328,9 +1458,11 @@ function renderActiveSession() {
     if (cancelBtn) cancelBtn.style.display = "none";
     if (clearRow) clearRow.style.display = state.hasAnyActiveSessions ? "flex" : "none";
     if (clearBtn) clearBtn.disabled = !state.hasAnyActiveSessions;
+    if (freeRow) freeRow.style.display = "none";
     return;
   }
   enableFinish();
+  if (freeRow) freeRow.style.display = "flex";
   if (state.activeExerciseId || state.guide) {
     showLogForm();
   } else {
@@ -1634,6 +1766,29 @@ function getCurrentTemplateForLogging() {
   return getSelectedTemplate();
 }
 
+function getSessionExerciseRows(tpl = getCurrentTemplateForLogging()) {
+  if (!tpl) return [];
+  const base = tpl.exercises || [];
+  if (state.activeSession && Number(tpl.id) === Number(state.activeSession.template_id)) {
+    const extras = (state.extraExercises || []).map((ex) => {
+      const ref = state.exercises.find((e) => Number(e.id) === Number(ex.exercise_id));
+      return {
+        exercise_id: ex.exercise_id,
+        exercise_name: ex.exercise_name || ref?.name || "Övning",
+        planned_sets: "",
+        reps: "",
+        planned_weight: "",
+        rpe: "",
+        rest: "",
+        comment: ex.comment || "Fri övning",
+        isExtra: true,
+      };
+    });
+    return [...base, ...extras];
+  }
+  return base;
+}
+
 function getPlannedSets(row) {
   const n = parseInt(row.planned_sets, 10);
   return Number.isFinite(n) && n > 0 ? n : 1;
@@ -1641,7 +1796,7 @@ function getPlannedSets(row) {
 
 function getTemplateRowForExercise(exerciseId, tpl = getCurrentTemplateForLogging()) {
   if (!tpl) return null;
-  return (tpl.exercises || []).find((r) => Number(r.exercise_id) === Number(exerciseId)) || null;
+  return getSessionExerciseRows(tpl).find((r) => Number(r.exercise_id) === Number(exerciseId)) || null;
 }
 
 function parseRestSeconds(restValue) {
@@ -1741,7 +1896,7 @@ function startRestTimer(seconds) {
     updateRestUI();
     if (remaining <= 0) {
       clearRestTimer();
-      exitFocusMode(true);
+      exitFocusMode(true, true);
     }
   }, 500);
   persistActiveSessionState();
@@ -1750,7 +1905,7 @@ function startRestTimer(seconds) {
 function skipRestTimer() {
   clearRestTimer();
   updateRestUI();
-  exitFocusMode(true);
+  exitFocusMode(true, true);
 }
 
 function prefillLogFields(row, setNumber = 1) {
@@ -1807,11 +1962,12 @@ function initGuideFromSession() {
   if (state.activeExerciseId && state.completedExercises[state.activeExerciseId]) {
     state.activeExerciseId = null;
   }
-  const allDone = tpl.exercises.every((row) => state.completedExercises[row.exercise_id]);
+  const rows = getSessionExerciseRows(tpl);
+  const allDone = rows.every((row) => state.completedExercises[row.exercise_id]);
   if (!state.activeExerciseId) {
     if (allDone) {
-      const lastIdx = Math.max(tpl.exercises.length - 1, 0);
-      const lastRow = tpl.exercises[lastIdx];
+      const lastIdx = Math.max(rows.length - 1, 0);
+      const lastRow = rows[lastIdx];
       const done = counts[Number(lastRow.exercise_id)] || 0;
       state.guide = { tplId: tpl.id, exerciseIndex: lastIdx, setNumber: done + 1, completed: true };
     } else {
@@ -1819,7 +1975,7 @@ function initGuideFromSession() {
     }
     return;
   }
-  const idx = tpl.exercises.findIndex((r) => Number(r.exercise_id) === Number(state.activeExerciseId));
+  const idx = rows.findIndex((r) => Number(r.exercise_id) === Number(state.activeExerciseId));
   if (idx === -1) {
     state.activeExerciseId = null;
     state.guide = null;
@@ -1851,7 +2007,8 @@ function applyGuideToForm() {
   }
   const tpl = state.templates.find((t) => t.id === state.guide.tplId);
   if (!tpl || !tpl.exercises.length) return;
-  const row = tpl.exercises[state.guide.exerciseIndex] || tpl.exercises[0];
+  const rows = getSessionExerciseRows(tpl);
+  const row = rows[state.guide.exerciseIndex] || rows[0];
   setLogExerciseOptions();
   if (exerciseSel) {
     exerciseSel.value = row.exercise_id;
@@ -1871,15 +2028,16 @@ function advanceGuideAfterSet(exerciseId) {
   if (!state.guide) return;
   const tpl = state.templates.find((t) => t.id === state.guide.tplId);
   if (!tpl || !tpl.exercises.length) return;
+  const rows = getSessionExerciseRows(tpl);
   let idx = state.guide.exerciseIndex;
-  const row = tpl.exercises[idx];
+  const row = rows[idx];
   if (!row) return;
   const planned = getPlannedSets(row);
   const sameExercise = exerciseId === row.exercise_id;
   let nextSet = sameExercise ? state.guide.setNumber + 1 : state.guide.setNumber;
   let completed = false;
   if (planned && nextSet > planned) {
-    if (idx + 1 < tpl.exercises.length) {
+    if (idx + 1 < rows.length) {
       idx = idx + 1;
       nextSet = 1;
     } else {
@@ -1891,7 +2049,8 @@ function advanceGuideAfterSet(exerciseId) {
 
 function setGuidePosition(tpl, exerciseId, setNumber, completed = false) {
   if (!tpl) return;
-  const idx = tpl.exercises.findIndex((r) => Number(r.exercise_id) === Number(exerciseId));
+  const rows = getSessionExerciseRows(tpl);
+  const idx = rows.findIndex((r) => Number(r.exercise_id) === Number(exerciseId));
   const safeIdx = idx >= 0 ? idx : 0;
   state.activeExerciseId = exerciseId ? Number(exerciseId) : null;
   state.guide = { tplId: tpl.id, exerciseIndex: safeIdx, setNumber: setNumber || 1, completed };
@@ -1900,7 +2059,7 @@ function setGuidePosition(tpl, exerciseId, setNumber, completed = false) {
 async function handlePostSetFlow(tpl, exerciseId) {
   if (!tpl || !state.activeSession) return;
   const counts = getExerciseLogCounts(state.activeSession);
-  const row = tpl.exercises.find((r) => Number(r.exercise_id) === Number(exerciseId));
+  const row = getTemplateRowForExercise(exerciseId, tpl);
   const planned = row ? getPlannedSets(row) : 0;
   const done = counts[Number(exerciseId)] || 0;
 
@@ -1996,6 +2155,7 @@ async function startSession() {
     return;
   }
   state.restoredWorkout = false;
+  state.extraExercises = [];
   state.workoutFocusMode = false;
   clearRestTimer();
   const startBtn = document.getElementById("startSessionBtn");
@@ -2071,7 +2231,14 @@ async function logSet(e) {
     return;
   }
   if (!tpl || !(tpl.exercises || []).some((row) => Number(row.exercise_id) === Number(payload.exercise_id))) {
-    alert("Övningen finns inte i passet.");
+    const sessionRows = tpl ? getSessionExerciseRows(tpl) : [];
+    if (!sessionRows.some((row) => Number(row.exercise_id) === Number(payload.exercise_id))) {
+      alert("Övningen finns inte i passet.");
+      return;
+    }
+  }
+  if (!tpl) {
+    alert("Välj passmall först.");
     return;
   }
   try {
@@ -2091,7 +2258,7 @@ async function logSet(e) {
       updateFocusModeUI(row);
     } else {
       clearRestTimer();
-      exitFocusMode(true);
+      exitFocusMode(true, true);
     }
     persistActiveSessionState();
   } catch (err) {
@@ -2118,6 +2285,7 @@ async function finishSession() {
   state.completedExercises = {};
   state.sessionStartedAt = null;
   state.workoutFocusMode = false;
+  state.extraExercises = [];
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
@@ -2145,6 +2313,7 @@ async function cancelSession() {
   state.completedExercises = {};
   state.sessionStartedAt = null;
   state.workoutFocusMode = false;
+  state.extraExercises = [];
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
@@ -2168,6 +2337,7 @@ async function clearActiveSessions() {
   state.completedExercises = {};
   state.sessionStartedAt = null;
   state.workoutFocusMode = false;
+  state.extraExercises = [];
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
@@ -2197,6 +2367,7 @@ async function refreshSessions() {
     state.sessionLocked = false;
     state.activeExerciseId = null;
     state.sessionStartedAt = null;
+    state.extraExercises = [];
     clearPersistedSessionState();
     showRestoreNotice("");
     exitSessionLockUI();
@@ -2794,6 +2965,8 @@ function bindEvents() {
       skipToNextExercise();
       applyGuideToForm();
     });
+  const addFreeExerciseBtn = document.getElementById("addFreeExerciseBtn");
+  if (addFreeExerciseBtn) addFreeExerciseBtn.addEventListener("click", openFreeExercisePicker);
   const newExerciseForm = document.getElementById("newExerciseForm");
   if (newExerciseForm) newExerciseForm.addEventListener("submit", createExercise);
   const newProgramForm = document.getElementById("newProgramForm");
@@ -2828,11 +3001,13 @@ function bindEvents() {
   });
   if (registerBtn) registerBtn.addEventListener("click", () => {
     if (authMode !== "register") {
-      setAuthMode("register");
-      return;
-    }
-    registerUser();
+    setAuthMode("register");
+    return;
+  }
+  registerUser();
   });
+  const themeToggleBtn = document.getElementById("themeToggle");
+  if (themeToggleBtn) themeToggleBtn.addEventListener("click", toggleTheme);
   document.addEventListener("click", handleActionClick);
   document.addEventListener("change", handleChangeAction);
 }
@@ -3178,6 +3353,7 @@ if (typeof window !== "undefined") {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  applyTheme(currentTheme);
   disableZoom();
   bindEvents();
   setTemplatesMode(state.templatesMode || "pass");

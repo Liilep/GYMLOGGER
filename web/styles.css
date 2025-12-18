@@ -8,7 +8,15 @@
   --text: #e6eeff;
   --danger: #ff7b7b;
   --radius: 16px;
+  --radius-sm: 12px;
+  --radius-lg: 20px;
+  --space: 12px;
+  --space-lg: 16px;
+  --font-base: 15px;
+  --font-small: 13px;
+  --border: 1px solid var(--line);
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.2);
   --notice: #122038;
   --bg-gradient: radial-gradient(circle at 20% 20%, #1b2a4a, #0a0f1f 50%), #0a0f1f;
   font-family: "Montserrat", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -24,6 +32,8 @@
   --text: #0c1424;
   --danger: #c0392b;
   --shadow: 0 8px 26px rgba(0, 0, 0, 0.12);
+  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.08);
+  --border: 1px solid #d6deef;
   --notice: #eef3ff;
   --bg-gradient: linear-gradient(180deg, #f7f9fe, #edf2fb 40%, #e7eefc);
 }
@@ -46,6 +56,11 @@ select,
 textarea,
 button {
   font-size: 16px;
+  border-radius: 10px;
+  border: var(--border);
+  background: #0f1a31;
+  color: var(--text);
+  padding: 12px;
 }
 
 .hidden {
@@ -80,14 +95,14 @@ body {
 
 .hero {
   background: linear-gradient(135deg, #16243e, #0e1628 60%, #0b1222);
-  border: 1px solid var(--line);
+  border: var(--border);
   border-radius: calc(var(--radius) * 1.1);
-  padding: 10px 12px;
+  padding: 12px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-soft);
 }
 
 .hero.slim {
@@ -102,8 +117,47 @@ body {
 
 .hero-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+}
+
+.status-chip {
+  border: var(--border);
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+#apiStatus.ok .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(108, 240, 194, 0.25);
+}
+
+#apiStatus.fail .status-dot,
+#apiStatus.down .status-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(192, 57, 43, 0.25);
+}
+
+#apiStatus.unknown .status-dot {
+  background: #f0ad4e;
+  box-shadow: 0 0 0 2px rgba(240, 173, 78, 0.25);
+}
+
+.status-chip:hover {
+  box-shadow: 0 0 0 2px rgba(106, 166, 255, 0.15);
 }
 
 .session-chip {
@@ -126,22 +180,23 @@ body {
 }
 
 .info-btn {
-  border: 1px solid var(--line);
-  background: rgba(106, 166, 255, 0.12);
-  color: #6aa6ff;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: var(--border);
+  background: transparent;
+  color: var(--accent-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .info-btn:hover {
-  background: rgba(106, 166, 255, 0.25);
-  box-shadow: 0 0 0 2px rgba(106, 166, 255, 0.2);
+  background: rgba(106, 166, 255, 0.15);
+  box-shadow: 0 0 0 2px rgba(106, 166, 255, 0.18);
 }
 
 .info-note {
@@ -157,28 +212,7 @@ body {
 }
 
 .status-indicator {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  border: 1px solid var(--line);
-  background: #0f172a;
-  color: var(--muted);
-}
-
-.status-indicator.ok {
-  background: rgba(108, 240, 194, 0.12);
-  color: #6cf0c2;
-  border-color: #2c7058;
-}
-
-.status-indicator.fail {
-  background: rgba(255, 123, 123, 0.12);
-  color: #ff7b7b;
-  border-color: #7c2a2a;
+  display: none;
 }
 
 .tabs {
@@ -244,10 +278,10 @@ body {
 .card {
   margin-top: 16px;
   background: var(--card);
-  border: 1px solid var(--line);
+  border: var(--border);
   border-radius: var(--radius);
   padding: 16px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-soft);
 }
 
 .stack {
@@ -273,7 +307,7 @@ body {
 
 .label {
   display: block;
-  font-size: 13px;
+  font-size: var(--font-small);
   color: var(--muted);
   margin-bottom: 6px;
 }

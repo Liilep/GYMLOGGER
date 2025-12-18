@@ -35,6 +35,9 @@ let restInterval = null;
 let sessionPersistTimer = null;
 let backNavGuardEnabled = false;
 let restoreApplied = false;
+let apiPollTimer = null;
+let apiPollInFlight = false;
+let apiReadyResolve = null;
 
 const storedBase = localStorage.getItem("API_BASE") || "";
 let API_BASE = window.API_BASE || storedBase || "";
@@ -43,7 +46,7 @@ const API_CANDIDATES = [
   "http://localhost:8001",
   "http://127.0.0.1:8001",
 ].filter(Boolean);
-const HEALTH_PATHS = ["/healthz", "/health"];
+const HEALTH_PATHS = ["/health", "/healthz"];
 const API_READY_BASE_DELAY = 2000;
 let authToken = localStorage.getItem("authToken") || "";
 const ACTIVE_SESSION_STORAGE_KEY = "activeWorkoutSession";
@@ -87,10 +90,11 @@ async function api(path, options = {}) {
   } catch (err) {
     console.warn("fetch misslyckades mot", API_BASE, "för", path, err);
     if (err && err.status === 401) throw err;
-    if (!err || err.status >= 500 || err.status === undefined) {
+    const shouldShowOverlay = !err || err.status === 0 || err.status === undefined || err.status >= 500;
+    if (shouldShowOverlay) {
       apiReady = false;
       showOverlay("Startar servern / Laddar…");
-      waitForApiReady(true).catch(() => {});
+      startApiReadyPolling(true);
     }
     try {
       const next = await detectApiBase(true);
@@ -102,7 +106,7 @@ async function api(path, options = {}) {
     } catch (detectErr) {
       console.error("API-bastest misslyckades", detectErr);
     }
-    throw new Error(`Kunde inte nå API (${API_BASE || "okänt"}): ${err.message || err}`);
+    throw new Error(`Kunde inte nå API (${API_BASE || "okänt"}): ${err?.message || err}`);
   }
 }
 
@@ -272,7 +276,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithTimeout(url, timeoutMs = 2500, options = {}) {
+async function fetchWithTimeout(url, timeoutMs = 3000, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -282,51 +286,96 @@ async function fetchWithTimeout(url, timeoutMs = 2500, options = {}) {
   }
 }
 
-async function healthCheck(base) {
-  let lastErr;
+async function checkApiReadyOnce(baseOverride) {
+  const base = baseOverride || API_BASE;
+  if (!base) return false;
   for (const path of HEALTH_PATHS) {
     try {
-      const res = await fetchWithTimeout(`${base}${path}`, 2500);
-      if (res.ok || res.status === 401 || res.status === 403) return true;
-      lastErr = new Error(`Health ${res.status}`);
+      const res = await fetchWithTimeout(`${base}${path}`, 5000);
+      if (res.status === 401 || res.status === 403) return true;
+      if (!res.ok) continue;
+      try {
+        const data = await res.json();
+        if (data && data.ok === false) return false;
+      } catch (_) {
+        // ignore parse errors; treat as ok if HTTP ok
+      }
+      return true;
     } catch (err) {
-      lastErr = err;
+      // try next path
     }
   }
-  if (lastErr) throw lastErr;
   return false;
+}
+
+function startApiReadyPolling(force = false) {
+  if (force) {
+    apiReady = false;
+    apiReadyPromise = null;
+    apiReadyResolve = null;
+    if (apiPollTimer) {
+      clearTimeout(apiPollTimer);
+      apiPollTimer = null;
+    }
+  }
+  if (apiReady) return Promise.resolve(true);
+  if (!apiReadyPromise) {
+    apiReadyPromise = new Promise((resolve) => {
+      apiReadyResolve = resolve;
+    });
+  }
+  if (apiPollTimer) return apiReadyPromise;
+  const poll = async () => {
+    if (apiPollInFlight) {
+      apiPollTimer = setTimeout(poll, 1500);
+      return;
+    }
+    apiPollInFlight = true;
+    let ready = false;
+    try {
+      if (!API_BASE) {
+        await detectApiBase().catch(() => {});
+      }
+      ready = await checkApiReadyOnce();
+    } catch (err) {
+      ready = false;
+    } finally {
+      apiPollInFlight = false;
+    }
+    if (ready) {
+      apiReady = true;
+      hideOverlay();
+      setStatusIndicator("ok", `API OK (${API_BASE || "okänt"})`);
+      if (apiReadyResolve) apiReadyResolve(true);
+      apiReadyPromise = null;
+      apiReadyResolve = null;
+      if (apiPollTimer) {
+        clearTimeout(apiPollTimer);
+        apiPollTimer = null;
+      }
+      return;
+    }
+    apiReady = false;
+    showOverlay("Startar servern / Laddar…");
+    setStatusIndicator("fail", `API väntar (${API_BASE || "okänt"})`);
+    apiPollTimer = setTimeout(poll, 2500);
+  };
+  apiPollTimer = setTimeout(poll, 0);
+  return apiReadyPromise;
 }
 
 async function waitForApiReady(force = false) {
   if (apiReady && !force) return true;
-  if (apiReadyPromise && !force) return apiReadyPromise;
-  apiReady = false;
-  showOverlay("Startar servern / Laddar…");
-  let attempt = 0;
-  const poll = async () => {
-    while (true) {
-      attempt++;
-      try {
-        await detectApiBase(attempt > 1);
-        const ok = await healthCheck(API_BASE);
-        if (ok) {
-          apiReady = true;
-          hideOverlay();
-          setStatusIndicator("ok", `API OK (${API_BASE})`);
-          apiReadyPromise = null;
-          return true;
-        }
-      } catch (err) {
-        console.warn("API ej redo ännu", err);
-        setStatusIndicator("fail", `API väntar (${API_BASE || "okänt"})`);
-      }
-      showOverlay("Startar servern / Laddar…");
-      const delay = Math.min(API_READY_BASE_DELAY + attempt * 500, 8000);
-      await sleep(delay);
+  const promise = startApiReadyPolling(force);
+  if (apiReady) return true;
+  if (promise && typeof promise.then === "function") {
+    await promise;
+  } else {
+    while (!apiReady) {
+      await sleep(300);
     }
-  };
-  apiReadyPromise = poll();
-  return apiReadyPromise;
+  }
+  return true;
 }
 
 function disableZoom() {
@@ -711,7 +760,7 @@ async function detectApiBase(force = false) {
 
 async function tryBase(base) {
   try {
-    const ok = await healthCheck(base);
+    const ok = await checkApiReadyOnce(base);
     if (ok) return true;
   } catch (err) {
     // fall through to doc check
@@ -3043,11 +3092,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   setAuthMode("login");
   updateRestUI();
   showOverlay("Startar servern / Laddar…");
+  startApiReadyPolling(true);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
       persistActiveSessionState(true);
+    } else if (document.visibilityState === "visible") {
+      const overlay = document.getElementById("appOverlay");
+      const isOverlayVisible = overlay && overlay.classList.contains("visible");
+      if (isOverlayVisible || !apiReady) {
+        startApiReadyPolling(true);
+      }
     }
   });
+  window.addEventListener("online", () => startApiReadyPolling(true));
   window.addEventListener("pagehide", () => persistActiveSessionState(true));
   window.addEventListener("pageshow", () => {
     if (restoreActiveSessionFromStorage(true)) {

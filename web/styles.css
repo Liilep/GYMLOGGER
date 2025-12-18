@@ -37,6 +37,17 @@ button {
   display: none !important;
 }
 
+.focus-only {
+  display: none;
+}
+
+.focus-exercise {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0f1a31;
+}
+
 body {
   margin: 0;
   background: radial-gradient(circle at 20% 20%, #1b2a4a, #0a0f1f 50%), #0a0f1f;
@@ -625,6 +636,18 @@ select {
   .select-grid {
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   }
+}
+
+.focus-mode .focus-hide {
+  display: none !important;
+}
+
+.focus-mode .focus-only {
+  display: block;
+}
+
+.focus-mode .pass-select-card {
+  display: none;
 }
 
 .app-overlay {

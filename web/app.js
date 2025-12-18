@@ -27,6 +27,7 @@ const state = {
   restTimer: null, // { total, remaining, deadline }
   sessionStartedAt: null,
   restoredWorkout: false,
+  workoutFocusMode: false,
 };
 
 let currentModal = null;
@@ -123,6 +124,7 @@ function logout() {
   state.completedExercises = {};
   state.sessionStartedAt = null;
   state.restoredWorkout = false;
+  state.workoutFocusMode = false;
   state.currentUser = null;
   state.programs = [];
   state.templates = [];
@@ -199,6 +201,7 @@ function clearPersistedSessionState(finalized = false) {
   sessionPersistTimer = null;
   restoreApplied = false;
   state.restoredWorkout = false;
+  state.workoutFocusMode = false;
   try {
     if (finalized) {
       localStorage.setItem(
@@ -220,6 +223,7 @@ function buildSessionSnapshot() {
     session: state.activeSession,
     guide: state.guide,
     activeExerciseId: state.activeExerciseId,
+    workoutFocusMode: state.workoutFocusMode,
     completedExercises: state.completedExercises || {},
     sessionLocked: state.sessionLocked,
     currentProgramId: state.currentProgramId,
@@ -376,6 +380,70 @@ async function waitForApiReady(force = false) {
     }
   }
   return true;
+}
+
+function scrollToLogArea() {
+  const logForm = document.getElementById("logForm") || document.getElementById("restTimerBox");
+  if (logForm && typeof logForm.scrollIntoView === "function") {
+    logForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function scrollToExerciseSelector() {
+  const selector = document.getElementById("templateExercises") || document.getElementById("tab-pass");
+  if (selector && typeof selector.scrollIntoView === "function") {
+    selector.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function getActiveExerciseRow() {
+  if (!state.activeSession) return null;
+  const tpl = state.templates.find((t) => t.id === state.activeSession.template_id);
+  if (!tpl) return null;
+  return tpl.exercises.find((r) => Number(r.exercise_id) === Number(state.activeExerciseId)) || null;
+}
+
+function updateFocusModeUI(rowOverride = null) {
+  const tab = document.getElementById("tab-pass");
+  if (tab) {
+    tab.classList.toggle("focus-mode", !!state.workoutFocusMode);
+  }
+  const info = document.getElementById("focusExerciseInfo");
+  if (!info) return;
+  if (!state.workoutFocusMode) {
+    info.style.display = "none";
+    info.textContent = "";
+    return;
+  }
+  const row = rowOverride || getActiveExerciseRow();
+  const ex = row ? state.exercises.find((e) => Number(e.id) === Number(row.exercise_id)) : null;
+  const counts = getExerciseLogCounts(state.activeSession);
+  const done = row ? counts[Number(row.exercise_id)] || 0 : 0;
+  const planned = row ? getPlannedSets(row) : 0;
+  const restText = row?.rest ? `• Vila ${row.rest}` : "";
+  info.textContent = row
+    ? `${ex?.name || "Övning"} • Set ${done + 1}${planned ? `/${planned}` : ""} ${restText}`
+    : "Fokusläge";
+  info.style.display = "block";
+}
+
+function enterFocusMode(row = null, { scroll = true } = {}) {
+  if (!state.activeSession) return;
+  state.workoutFocusMode = true;
+  updateFocusModeUI(row);
+  if (scroll) scrollToLogArea();
+  persistActiveSessionState();
+}
+
+function exitFocusMode(scroll = false) {
+  if (!state.workoutFocusMode) {
+    if (scroll) scrollToExerciseSelector();
+    return;
+  }
+  state.workoutFocusMode = false;
+  updateFocusModeUI();
+  if (scroll) scrollToExerciseSelector();
+  persistActiveSessionState();
 }
 
 function disableZoom() {
@@ -578,6 +646,7 @@ function restoreActiveSessionFromStorage(markRestored = false) {
   if (saved.restTimer) {
     resumeRestTimerFromSaved(saved.restTimer);
   }
+  state.workoutFocusMode = saved.workoutFocusMode ?? Boolean(state.activeExerciseId || saved.restTimer);
   restoreApplied = true;
   if (markRestored) {
     state.restoredWorkout = true;
@@ -710,6 +779,11 @@ async function loadData(options = {}) {
   renderFriendRequests();
   renderPublicView();
   renderAuthStatus(true);
+  if (state.activeSession && (state.restTimer || state.activeExerciseId)) {
+    state.workoutFocusMode = state.workoutFocusMode || true;
+  } else if (!state.activeSession) {
+    state.workoutFocusMode = false;
+  }
   renderActiveSession();
   renderPBs();
   renderSessionHistory();
@@ -717,6 +791,7 @@ async function loadData(options = {}) {
   toggleStartButton();
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode(authMode || "login");
+  updateFocusModeUI();
   persistActiveSessionState();
 }
 
@@ -959,6 +1034,7 @@ function selectExerciseForSession(exerciseId) {
   updateGuideUI(state.guide);
   const row = tpl.exercises[idx];
   prefillLogFields(row, state.guide.setNumber);
+   enterFocusMode(row);
   persistActiveSessionState();
 }
 
@@ -1242,6 +1318,8 @@ function renderActiveSession() {
   list.innerHTML = "";
   if (!state.activeSession) {
     label.textContent = "Ingen aktiv session";
+    state.workoutFocusMode = false;
+    updateFocusModeUI();
     updateGuideUI(null);
     clearRestTimer();
     disableStartFinish();
@@ -1286,6 +1364,7 @@ function renderActiveSession() {
   }
   updateGuideUI(state.guide);
   updateRestUI();
+  updateFocusModeUI();
 }
 
 function renderSessionHistory() {
@@ -1653,6 +1732,8 @@ function startRestTimer(seconds) {
   if (!secs) return;
   const deadline = Date.now() + secs * 1000;
   state.restTimer = { total: secs, remaining: secs, deadline };
+  state.workoutFocusMode = true;
+  updateFocusModeUI();
   updateRestUI();
   restInterval = setInterval(() => {
     const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -1660,6 +1741,7 @@ function startRestTimer(seconds) {
     updateRestUI();
     if (remaining <= 0) {
       clearRestTimer();
+      exitFocusMode(true);
     }
   }, 500);
   persistActiveSessionState();
@@ -1668,6 +1750,7 @@ function startRestTimer(seconds) {
 function skipRestTimer() {
   clearRestTimer();
   updateRestUI();
+  exitFocusMode(true);
 }
 
 function prefillLogFields(row, setNumber = 1) {
@@ -1752,6 +1835,8 @@ function applyGuideToForm() {
   const exerciseSel = document.getElementById("logExercise");
   if (!state.guide) {
     clearRestTimer();
+    state.workoutFocusMode = false;
+    updateFocusModeUI();
     if (exerciseSel) {
       exerciseSel.value = "";
       exerciseSel.disabled = true;
@@ -1911,6 +1996,7 @@ async function startSession() {
     return;
   }
   state.restoredWorkout = false;
+  state.workoutFocusMode = false;
   clearRestTimer();
   const startBtn = document.getElementById("startSessionBtn");
   if (startBtn) {
@@ -2001,8 +2087,11 @@ async function logSet(e) {
     const exerciseCompleted = !!state.completedExercises?.[payload.exercise_id];
     if (state.activeSession && restSeconds && !exerciseCompleted) {
       startRestTimer(restSeconds);
+      state.workoutFocusMode = true;
+      updateFocusModeUI(row);
     } else {
       clearRestTimer();
+      exitFocusMode(true);
     }
     persistActiveSessionState();
   } catch (err) {
@@ -2028,6 +2117,7 @@ async function finishSession() {
   state.activeExerciseId = null;
   state.completedExercises = {};
   state.sessionStartedAt = null;
+  state.workoutFocusMode = false;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
@@ -2054,6 +2144,7 @@ async function cancelSession() {
   state.activeExerciseId = null;
   state.completedExercises = {};
   state.sessionStartedAt = null;
+  state.workoutFocusMode = false;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);
@@ -2076,6 +2167,7 @@ async function clearActiveSessions() {
   clearRestTimer();
   state.completedExercises = {};
   state.sessionStartedAt = null;
+  state.workoutFocusMode = false;
   hideLogForm();
   disableStartFinish();
   showSelectorArea(true);

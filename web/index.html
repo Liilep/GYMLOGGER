@@ -68,7 +68,7 @@
       </div>
 
       <div id="tab-pass" class="tab-panel active">
-        <section class="card">
+        <section class="card pass-select-card focus-hide">
           <div class="row space">
             <div>
               <label class="label">Välj program & passmall</label>
@@ -111,13 +111,14 @@
             <div>
               <label class="label">Logga set</label>
               <button class="info-btn" type="button" data-info-toggle="info-log">i</button>
-              <div class="info-note" id="info-log">
+              <div class="info-note focus-hide" id="info-log">
                 Logga set mot den valda passmallen. Guiden visar nästa planerade set.
               </div>
           <div class="muted" id="activeSessionLabel">Ingen aktiv session</div>
-          <div class="muted" id="guideStatus">Välj passmall och starta pass.</div>
+          <div class="muted focus-hide" id="guideStatus">Välj passmall och starta pass.</div>
+          <div id="focusExerciseInfo" class="focus-only focus-exercise muted small" style="display:none;"></div>
         </div>
-        <button id="nextExerciseBtn" class="btn ghost" type="button">Nästa övning</button>
+        <button id="nextExerciseBtn" class="btn ghost focus-hide" type="button">Nästa övning</button>
       </div>
       <div id="restTimerBox" class="rest-timer" style="display:none;">
         <div>
@@ -157,7 +158,7 @@
             </div>
             <button type="submit" class="btn primary full">Lägg till set</button>
           </form>
-          <div id="setLogList" class="list"></div>
+          <div id="setLogList" class="list focus-hide"></div>
         </section>
       </div>
 

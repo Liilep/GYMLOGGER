@@ -2226,6 +2226,7 @@ async function logSet(e) {
     alert("Vila pågår. Vänta klart eller hoppa över vilan innan du loggar nästa set.");
     return;
   }
+  const form = e.target?.closest("form") || document.getElementById("logForm");
   const tpl = getCurrentTemplateForLogging();
   const selectEl = document.getElementById("logExercise");
   let exerciseIdRaw = selectEl ? selectEl.value : "";
@@ -2238,13 +2239,18 @@ async function logSet(e) {
     }
   }
   const exercise_id = exerciseIdRaw ? Number(exerciseIdRaw) : null;
+  const setNumber = state.guide ? state.guide.setNumber : Number(document.getElementById("logSet").value || 1);
+  const weightInput = form?.querySelector("#logWeight");
+  const repsInput = form?.querySelector("#logReps");
+  const rpeInput = form?.querySelector("#logRpe");
+  const commentInput = form?.querySelector("#logComment");
   const payload = {
     exercise_id,
-    set_number: state.guide ? state.guide.setNumber : Number(document.getElementById("logSet").value || 1),
-    weight: Number(document.getElementById("logWeight").value || 0),
-    reps: Number(document.getElementById("logReps").value || 0),
-    rpe: Number(document.getElementById("logRpe").value || 0),
-    comment: document.getElementById("logComment").value || "",
+    set_number: setNumber,
+    weight: Number(weightInput?.value || 0),
+    reps: Number(repsInput?.value || 0),
+    rpe: Number(rpeInput?.value || 0),
+    comment: commentInput?.value || "",
   };
   if (!exercise_id) {
     alert("Välj en övning i passet för att börja.");
@@ -2262,20 +2268,22 @@ async function logSet(e) {
     return;
   }
   try {
-    await api(`/sessions/${state.activeSession.id}/log-set`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
     const plannedRow = tpl ? getTemplateRowForExercise(payload.exercise_id, tpl) : null;
     const dbgWeight = getPlannedValueForSet(plannedRow, "planned_weight", payload.set_number);
     const dbgReps = getPlannedValueForSet(plannedRow, "reps", payload.set_number);
-    console.debug("logSet", {
+    console.debug("[LOGSET]", {
       exerciseId: payload.exercise_id,
       setNumber: payload.set_number,
+      inputWeight: weightInput?.value || "",
+      inputReps: repsInput?.value || "",
       plannedWeight: dbgWeight,
       plannedReps: dbgReps,
       loggedWeight: payload.weight,
       loggedReps: payload.reps,
+    });
+    await api(`/sessions/${state.activeSession.id}/log-set`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
     document.getElementById("logForm").reset();
     await refreshSessions();
@@ -3449,10 +3457,10 @@ function setAuthMode(mode) {
 function setStatusIndicator(state, tooltip = "") {
   const el = document.getElementById("apiStatus");
   if (!el) return;
-  el.classList.remove("ok", "fail", "unknown");
-  el.classList.add(state);
-  el.textContent = state === "ok" ? "✓" : state === "fail" ? "✕" : "?";
-  el.title = tooltip;
+  el.classList.remove("ok", "fail", "unknown", "down");
+  if (state) el.classList.add(state);
+  el.title = tooltip || "API-status";
+  el.setAttribute("aria-label", tooltip || "API-status");
 }
 
 async function loginUser() {

@@ -329,16 +329,9 @@ async function waitForApiReady(force = false) {
   return apiReadyPromise;
 }
 
-function setupZoomGuards() {
-  window.addEventListener(
-    "wheel",
-    (e) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-      }
-    },
-    { passive: false }
-  );
+function disableZoom() {
+  if (disableZoom.hasRun) return;
+  disableZoom.hasRun = true;
   ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
     window.addEventListener(
       ev,
@@ -348,6 +341,30 @@ function setupZoomGuards() {
       { passive: false }
     );
   });
+  window.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    },
+    { passive: false }
+  );
+  window.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    },
+    { passive: false }
+  );
+  let lastTouchEnd = 0;
+  window.addEventListener(
+    "touchend",
+    (e) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    },
+    { passive: false }
+  );
 }
 
 function showRestoreNotice(message = "", options = {}) {
@@ -3020,7 +3037,7 @@ if (typeof window !== "undefined") {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  setupZoomGuards();
+  disableZoom();
   bindEvents();
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode("login");

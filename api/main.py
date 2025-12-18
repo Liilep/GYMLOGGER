@@ -47,8 +47,14 @@ def on_startup():
 
 
 @app.api_route("/health", methods=["GET", "HEAD"], operation_id="health_check")
-def health():
-    return {"ok": True}
+@app.api_route("/healthz", methods=["GET", "HEAD"], include_in_schema=False)
+def health(session: Session = Depends(get_session)):
+    try:
+        # Simple DB readiness check; errors bubble as 503.
+        session.exec(select(func.count(User.id))).first()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not ready")
+    return {"ok": True, "db": "ok"}
 
 
 @app.get("/")

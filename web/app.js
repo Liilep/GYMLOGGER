@@ -1009,22 +1009,29 @@ function renderTemplateExercises(tpl) {
     const doneCount = counts[Number(row.exercise_id)] || 0;
     const planned = getPlannedSets(row);
     const isCompleted = inSession && state.completedExercises[row.exercise_id];
+    const isInProgress = inSession && !isCompleted && doneCount > 0;
     const isActive = inSession && Number(state.activeExerciseId) === Number(row.exercise_id);
     div.className = "exercise-card";
     if (inSession) {
       div.classList.add("session-exercise");
       if (isCompleted) div.classList.add("done");
+      else if (isInProgress) div.classList.add("in-progress");
       if (isActive) div.classList.add("active");
       if (!isCompleted) {
         div.classList.add("clickable");
         div.addEventListener("click", () => selectExerciseForSession(row.exercise_id));
       }
     }
-    const statusLabel = inSession
-      ? `<span class="pill ${isCompleted ? "success" : isActive ? "accent" : "subtle"}">${
-          isCompleted ? "Klar" : isActive ? "Pågår" : "Redo"
-        }</span>`
-      : '<span class="pill subtle">Planerat</span>';
+    let statusLabel = '<span class="pill subtle">Planerat</span>';
+    if (inSession) {
+      if (isCompleted) {
+        statusLabel = '<span class="pill success">Klar</span>';
+      } else if (isInProgress) {
+        statusLabel = '<span class="pill warn">Pågår</span>';
+      } else {
+        statusLabel = '<span class="pill subtle">Planerat</span>';
+      }
+    }
     const progress = inSession ? `<div class="meta">Loggade set: ${doneCount} / ${planned}</div>` : "";
     const freeBadge = row.isExtra ? '<span class="pill accent">Fri</span>' : "";
     div.innerHTML = `

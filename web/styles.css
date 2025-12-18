@@ -351,6 +351,12 @@ body {
   border: 1px solid rgba(108, 240, 194, 0.4);
 }
 
+.pill.warn {
+  background: rgba(255, 214, 102, 0.18);
+  color: #241a04;
+  border: 1px solid rgba(255, 214, 102, 0.4);
+}
+
 :root[data-theme="light"] .pill {
   background: #eef3ff;
   border: 1px solid #d6deef;
@@ -374,6 +380,12 @@ body {
   border: 1px solid rgba(46, 125, 109, 0.35);
 }
 
+:root[data-theme="light"] .pill.warn {
+  background: rgba(255, 214, 102, 0.25);
+  color: #0c1424;
+  border: 1px solid rgba(255, 214, 102, 0.5);
+}
+
 .exercise-card {
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -383,7 +395,8 @@ body {
 
 .exercise-card.session-exercise {
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .exercise-card.session-exercise.clickable:hover {
@@ -402,6 +415,16 @@ body {
   background: rgba(108, 240, 194, 0.08);
   pointer-events: none;
   opacity: 0.9;
+}
+
+.exercise-card.session-exercise.in-progress {
+  border-color: rgba(255, 214, 102, 0.6);
+  background: rgba(255, 214, 102, 0.12);
+}
+
+:root[data-theme="light"] .exercise-card.session-exercise.in-progress {
+  background: rgba(255, 214, 102, 0.2);
+  border-color: rgba(255, 214, 102, 0.6);
 }
 
 .exercise-card h3 {

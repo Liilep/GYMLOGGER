@@ -329,6 +329,27 @@ async function waitForApiReady(force = false) {
   return apiReadyPromise;
 }
 
+function setupZoomGuards() {
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+  ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
+    window.addEventListener(
+      ev,
+      (e) => {
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+  });
+}
+
 function showRestoreNotice(message = "", options = {}) {
   let bar = document.getElementById("sessionRestoreBanner");
   if (!bar) {
@@ -2999,6 +3020,7 @@ if (typeof window !== "undefined") {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupZoomGuards();
   bindEvents();
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode("login");

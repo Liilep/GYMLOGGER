@@ -19,6 +19,13 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
 .hidden {
   display: none !important;
 }

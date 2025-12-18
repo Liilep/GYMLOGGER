@@ -1182,9 +1182,20 @@ function openFreeExercisePicker() {
 function setLogExerciseOptions() {
   const sel = document.getElementById("logExercise");
   if (!sel) return;
-  sel.innerHTML = "";
+  const prevValue = sel.value;
+  const form = document.getElementById("logForm");
   const tpl = getCurrentTemplateForLogging();
-  const list = tpl ? getSessionExerciseRows(tpl) : [];
+  const rows = tpl ? getSessionExerciseRows(tpl) : [];
+  const guideRow =
+    tpl && state.guide && rows[state.guide.exerciseIndex] ? rows[state.guide.exerciseIndex] : null;
+  const targetValue =
+    guideRow?.exercise_id ||
+    form?.dataset?.exerciseId ||
+    state.activeExerciseId ||
+    prevValue ||
+    (rows[0] ? rows[0].exercise_id : "");
+  sel.innerHTML = "";
+  const list = rows;
   sel.disabled = !list.length;
   if (tpl && list.length) {
     list.forEach((row) => {
@@ -1194,7 +1205,9 @@ function setLogExerciseOptions() {
       opt.textContent = `${ex?.name || row.exercise_id}${row.isExtra ? " (Fri)" : ""}`;
       sel.appendChild(opt);
     });
-    if (!sel.value && list[0]) {
+    if (targetValue && [...sel.options].some((o) => String(o.value) === String(targetValue))) {
+      sel.value = targetValue;
+    } else if (!sel.value && list[0]) {
       sel.value = list[0].exercise_id;
     }
     handleLogExerciseChange();

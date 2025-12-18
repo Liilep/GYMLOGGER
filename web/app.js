@@ -26,6 +26,7 @@ const state = {
   completedExercises: {},
   restTimer: null, // { total, remaining, deadline }
   sessionStartedAt: null,
+  restoredWorkout: false,
 };
 
 let currentModal = null;
@@ -100,6 +101,7 @@ function logout() {
   state.activeExerciseId = null;
   state.completedExercises = {};
   state.sessionStartedAt = null;
+  state.restoredWorkout = false;
   state.currentUser = null;
   state.programs = [];
   state.templates = [];
@@ -175,6 +177,7 @@ function clearPersistedSessionState(finalized = false) {
   clearTimeout(sessionPersistTimer);
   sessionPersistTimer = null;
   restoreApplied = false;
+  state.restoredWorkout = false;
   try {
     if (finalized) {
       localStorage.setItem(
@@ -259,32 +262,47 @@ function showRestoreNotice(message = "", options = {}) {
     }
   }
   bar.innerHTML = "";
-  if (!message) {
+  if (!message || !state.restoredWorkout) {
     bar.style.display = "none";
     return;
   }
   const text = document.createElement("span");
   text.textContent = message;
   bar.appendChild(text);
+
+  const controls = document.createElement("div");
+  controls.style.display = "flex";
+  controls.style.gap = "8px";
   if (options.showResume) {
     const resumeBtn = document.createElement("button");
     resumeBtn.type = "button";
     resumeBtn.className = "btn ghost small";
     resumeBtn.textContent = "Fortsätt pass";
     resumeBtn.addEventListener("click", () => {
+      state.restoredWorkout = false;
+      showRestoreNotice("");
       switchTab("tab-pass");
       const guideEl = document.getElementById("guideStatus");
       if (guideEl) guideEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      persistActiveSessionState(true);
     });
-    bar.appendChild(resumeBtn);
+    controls.appendChild(resumeBtn);
   }
-  if (options.showCancel) {
-    const abortBtn = document.createElement("button");
-    abortBtn.type = "button";
-    abortBtn.className = "btn ghost small danger-text";
-    abortBtn.textContent = "Avbryt pass";
-    abortBtn.addEventListener("click", () => cancelSession());
-    bar.appendChild(abortBtn);
+
+  if (options.allowDismiss !== false) {
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.className = "btn ghost small";
+    dismissBtn.textContent = "Stäng";
+    dismissBtn.addEventListener("click", () => {
+      state.restoredWorkout = false;
+      showRestoreNotice("");
+      persistActiveSessionState(true);
+    });
+    controls.appendChild(dismissBtn);
+  }
+  if (controls.children.length) {
+    bar.appendChild(controls);
   }
   bar.style.display = "flex";
 }
@@ -345,7 +363,7 @@ function resumeRestTimerFromSaved(rest) {
   startRestTimer(remaining);
 }
 
-function restoreActiveSessionFromStorage() {
+function restoreActiveSessionFromStorage(markRestored = false) {
   if (restoreApplied) return false;
   // Reload session UI state from localStorage if a pass was active.
   const saved = loadPersistedSessionState();
@@ -378,16 +396,24 @@ function restoreActiveSessionFromStorage() {
     resumeRestTimerFromSaved(saved.restTimer);
   }
   restoreApplied = true;
+  if (markRestored) {
+    state.restoredWorkout = true;
+  }
   enterSessionLockUI();
   showSelectorArea(false);
   enableFinish();
-  showRestoreNotice("Återställde pågående pass.", { showResume: true, showCancel: true });
+  if (state.restoredWorkout) {
+    showRestoreNotice("Återställde pågående pass.", { showResume: true });
+  } else {
+    showRestoreNotice("");
+  }
   enableNavigationGuards();
   persistActiveSessionState(true);
   return true;
 }
 
-async function loadData() {
+async function loadData(options = {}) {
+  const { markRestored = false } = options || {};
   await detectApiBase();
   await pingApi();
   if (!authToken) {
@@ -440,7 +466,7 @@ async function loadData() {
     };
   });
   state.activeSession = state.sessions.find((s) => s.status === "in_progress") || null;
-  restoreActiveSessionFromStorage();
+  restoreActiveSessionFromStorage(markRestored);
   if (isSessionActive()) {
     state.sessionStartedAt =
       state.sessionStartedAt ||
@@ -1704,6 +1730,7 @@ async function startSession() {
     alert("Passmallen hittades inte.");
     return;
   }
+  state.restoredWorkout = false;
   clearRestTimer();
   const startBtn = document.getElementById("startSessionBtn");
   if (startBtn) {
@@ -1815,6 +1842,7 @@ async function finishSession() {
   await api(`/sessions/${state.activeSession.id}/finish`, { method: "POST" });
   // Closed session: clear persisted state so next start is clean.
   clearPersistedSessionState(true);
+  state.restoredWorkout = false;
   disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
@@ -1840,6 +1868,7 @@ async function cancelSession() {
   await api(`/sessions/${state.activeSession.id}/cancel`, { method: "POST" });
   // Closed session: clear persisted state so next start is clean.
   clearPersistedSessionState(true);
+  state.restoredWorkout = false;
   disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
@@ -1859,6 +1888,7 @@ async function clearActiveSessions() {
   const currentId = state.activeSession?.id;
   await api("/sessions/clear-active", { method: "POST" });
   clearPersistedSessionState(true);
+  state.restoredWorkout = false;
   disableNavigationGuards();
   state.activeSession = null;
   state.sessionLocked = false;
@@ -2888,13 +2918,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   window.addEventListener("pagehide", () => persistActiveSessionState(true));
   window.addEventListener("pageshow", () => {
-    if (restoreActiveSessionFromStorage()) {
+    if (restoreActiveSessionFromStorage(true)) {
       renderActiveSession();
       applyGuideToForm();
     }
   });
   try {
-    await loadData();
+    await loadData({ markRestored: true });
   } catch (err) {
     alert("Kunde inte ladda data: " + err.message);
   }
@@ -2955,7 +2985,7 @@ async function loginUser() {
     authToken = `Bearer ${data.access_token}`;
     localStorage.setItem("authToken", authToken);
     renderAuthStatus(true);
-    await loadData();
+    await loadData({ markRestored: true });
   } catch (err) {
     alert("Login misslyckades: " + err.message);
   }
@@ -2981,7 +3011,7 @@ async function registerUser() {
     authToken = `Bearer ${data.access_token}`;
     localStorage.setItem("authToken", authToken);
     renderAuthStatus(true);
-    await loadData();
+    await loadData({ markRestored: true });
   } catch (err) {
     alert("Registrering misslyckades: " + err.message);
   }

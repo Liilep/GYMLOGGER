@@ -2,12 +2,21 @@
 <html lang="sv">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Gym Logg</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="icon" href="data:," />
   </head>
   <body>
+    <div id="appOverlay" class="app-overlay hidden" aria-live="polite">
+      <div class="overlay-content">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <div class="overlay-title">Startar servern / Laddar…</div>
+          <div class="overlay-sub">Kollar API & databas. Detta kan ta några sekunder.</div>
+        </div>
+      </div>
+    </div>
     <div class="page">
       <header class="hero slim">
         <div class="brand">Gym Logg</div>

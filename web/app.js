@@ -43,38 +43,55 @@ const API_CANDIDATES = [
   "http://localhost:8001",
   "http://127.0.0.1:8001",
 ].filter(Boolean);
+const HEALTH_PATHS = ["/healthz", "/health"];
+const API_READY_BASE_DELAY = 2000;
 let authToken = localStorage.getItem("authToken") || "";
 const ACTIVE_SESSION_STORAGE_KEY = "activeWorkoutSession";
 const SESSION_PERSIST_DEBOUNCE_MS = 300;
 const SESSION_LEAVE_WARNING = "Du har ett pågående pass. Lämnar du sidan kan data gå förlorad.";
+let apiReady = false;
+let apiReadyPromise = null;
 
 async function api(path, options = {}) {
-  if (!API_BASE) {
-    await detectApiBase();
-  }
+  await waitForApiReady();
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
   if (authToken) headers.Authorization = authToken;
   const fetchWithBase = async (base) => {
-    const res = await fetch(`${base}${path}`, { ...options, headers });
-    if (res.status === 401) {
-      handleUnauthorized();
-      throw new Error("Unauthorized");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs || 10000);
+    try {
+      const res = await fetch(`${base}${path}`, { ...options, headers, signal: controller.signal });
+      if (res.status === 401) {
+        handleUnauthorized();
+        const err = new Error("Unauthorized");
+        err.status = 401;
+        throw err;
+      }
+      if (!res.ok) {
+        const txt = await res.text();
+        const err = new Error(txt || res.statusText);
+        err.status = res.status;
+        throw err;
+      }
+      if (res.status === 204) return null;
+      return res.json();
+    } finally {
+      clearTimeout(timer);
     }
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt || res.statusText);
-    }
-    if (res.status === 204) return null;
-    return res.json();
   };
   try {
     return await fetchWithBase(API_BASE);
   } catch (err) {
     console.warn("fetch misslyckades mot", API_BASE, "för", path, err);
-    if (err && err.message === "Unauthorized") throw err;
+    if (err && err.status === 401) throw err;
+    if (!err || err.status >= 500 || err.status === undefined) {
+      apiReady = false;
+      showOverlay("Startar servern / Laddar…");
+      waitForApiReady(true).catch(() => {});
+    }
     try {
       const next = await detectApiBase(true);
       if (next && next !== API_BASE) {
@@ -231,6 +248,85 @@ function persistActiveSessionState(immediate = false) {
   }
   clearTimeout(sessionPersistTimer);
   sessionPersistTimer = setTimeout(saver, SESSION_PERSIST_DEBOUNCE_MS);
+}
+
+function showOverlay(message = "Startar servern / Laddar…", sub = "Kollar API och databasstatus...") {
+  const overlay = document.getElementById("appOverlay");
+  if (!overlay) return;
+  const title = overlay.querySelector(".overlay-title");
+  const subEl = overlay.querySelector(".overlay-sub");
+  if (title && message) title.textContent = message;
+  if (subEl && sub) subEl.textContent = sub;
+  overlay.classList.remove("hidden");
+  overlay.classList.add("visible");
+}
+
+function hideOverlay() {
+  const overlay = document.getElementById("appOverlay");
+  if (!overlay) return;
+  overlay.classList.remove("visible");
+  overlay.classList.add("hidden");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url, timeoutMs = 2500, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function healthCheck(base) {
+  let lastErr;
+  for (const path of HEALTH_PATHS) {
+    try {
+      const res = await fetchWithTimeout(`${base}${path}`, 2500);
+      if (res.ok || res.status === 401 || res.status === 403) return true;
+      lastErr = new Error(`Health ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  return false;
+}
+
+async function waitForApiReady(force = false) {
+  if (apiReady && !force) return true;
+  if (apiReadyPromise && !force) return apiReadyPromise;
+  apiReady = false;
+  showOverlay("Startar servern / Laddar…");
+  let attempt = 0;
+  const poll = async () => {
+    while (true) {
+      attempt++;
+      try {
+        await detectApiBase(attempt > 1);
+        const ok = await healthCheck(API_BASE);
+        if (ok) {
+          apiReady = true;
+          hideOverlay();
+          setStatusIndicator("ok", `API OK (${API_BASE})`);
+          apiReadyPromise = null;
+          return true;
+        }
+      } catch (err) {
+        console.warn("API ej redo ännu", err);
+        setStatusIndicator("fail", `API väntar (${API_BASE || "okänt"})`);
+      }
+      showOverlay("Startar servern / Laddar…");
+      const delay = Math.min(API_READY_BASE_DELAY + attempt * 500, 8000);
+      await sleep(delay);
+    }
+  };
+  apiReadyPromise = poll();
+  return apiReadyPromise;
 }
 
 function showRestoreNotice(message = "", options = {}) {
@@ -414,8 +510,7 @@ function restoreActiveSessionFromStorage(markRestored = false) {
 
 async function loadData(options = {}) {
   const { markRestored = false } = options || {};
-  await detectApiBase();
-  await pingApi();
+  await waitForApiReady();
   if (!authToken) {
     renderAuthStatus(false);
     setMainVisibility(false);
@@ -543,11 +638,10 @@ async function pingApi() {
   if (!statusEl) return;
   setStatusIndicator("unknown", "Testar API...");
   try {
-    const res = await fetch(`${API_BASE}/health`, { method: "GET" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await waitForApiReady(true);
     setStatusIndicator("ok", `API OK (${API_BASE})`);
   } catch (err) {
-    setStatusIndicator("fail", `API FEL (${API_BASE}): ${err.message}`);
+    setStatusIndicator("fail", `API FEL (${API_BASE || "okänt"}): ${err.message}`);
     console.error("API ping misslyckades", err);
   }
 }
@@ -570,7 +664,7 @@ async function detectApiBase(force = false) {
       console.warn("API base misslyckades", base, err);
     }
   }
-  const errMsg = "Ingen API-bas kunde nas (testade: " + candidates.join(", ") + ")";
+  const errMsg = "Ingen API-bas kunde nås (testade: " + candidates.join(", ") + ")";
   if (statusEl) {
     setStatusIndicator("fail", errMsg);
   }
@@ -578,20 +672,19 @@ async function detectApiBase(force = false) {
 }
 
 async function tryBase(base) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2000);
   try {
-    const res = await fetch(`${base}/health`, { signal: controller.signal });
-    if (res.ok) return true;
-    if (res.status === 404) {
-      const res2 = await fetch(`${base}/openapi.json`, { signal: controller.signal });
-      if (res2.ok) return true;
-      const res3 = await fetch(`${base}/docs`, { signal: controller.signal });
-      return res3.ok;
-    }
+    const ok = await healthCheck(base);
+    if (ok) return true;
+  } catch (err) {
+    // fall through to doc check
+  }
+  try {
+    const res2 = await fetchWithTimeout(`${base}/openapi.json`, 2000);
+    if (res2.ok) return true;
+    const res3 = await fetchWithTimeout(`${base}/docs`, 2000);
+    return res3.ok;
+  } catch (err) {
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1772,7 +1865,6 @@ async function startSession() {
 
 async function logSet(e) {
   e.preventDefault();
-  await detectApiBase().catch(() => {});
   if (!state.activeSession) {
     alert("Starta ett pass först.");
     return;
@@ -2911,6 +3003,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setTemplatesMode(state.templatesMode || "pass");
   setAuthMode("login");
   updateRestUI();
+  showOverlay("Startar servern / Laddar…");
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
       persistActiveSessionState(true);
@@ -2975,18 +3068,28 @@ async function loginUser() {
     return;
   }
   try {
+    await waitForApiReady();
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username, password }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = new Error((await res.text()) || res.statusText);
+      err.status = res.status;
+      throw err;
+    }
     const data = await res.json();
     authToken = `Bearer ${data.access_token}`;
     localStorage.setItem("authToken", authToken);
     renderAuthStatus(true);
     await loadData({ markRestored: true });
   } catch (err) {
+    if (!err || err.status >= 500 || err.status === undefined) {
+      apiReady = false;
+      showOverlay("Startar servern / Laddar…");
+      waitForApiReady(true).catch(() => {});
+    }
     alert("Login misslyckades: " + err.message);
   }
 }
@@ -3001,18 +3104,28 @@ async function registerUser() {
     return;
   }
   try {
+    await waitForApiReady();
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, display_name: name, username }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const err = new Error((await res.text()) || res.statusText);
+      err.status = res.status;
+      throw err;
+    }
     const data = await res.json();
     authToken = `Bearer ${data.access_token}`;
     localStorage.setItem("authToken", authToken);
     renderAuthStatus(true);
     await loadData({ markRestored: true });
   } catch (err) {
+    if (!err || err.status >= 500 || err.status === undefined) {
+      apiReady = false;
+      showOverlay("Startar servern / Laddar…");
+      waitForApiReady(true).catch(() => {});
+    }
     alert("Registrering misslyckades: " + err.message);
   }
 }

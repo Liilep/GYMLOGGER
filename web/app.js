@@ -2009,10 +2009,15 @@ function applyGuideToForm() {
   const logSetInput = document.getElementById("logSet");
   const submitBtn = document.querySelector("#logForm button[type='submit']");
   const exerciseSel = document.getElementById("logExercise");
+  const logForm = document.getElementById("logForm");
   if (!state.guide) {
     clearRestTimer();
     state.workoutFocusMode = false;
     updateFocusModeUI();
+    if (logForm) {
+      delete logForm.dataset.exerciseId;
+      delete logForm.dataset.setNumber;
+    }
     if (exerciseSel) {
       exerciseSel.value = "";
       exerciseSel.disabled = true;
@@ -2037,6 +2042,10 @@ function applyGuideToForm() {
   if (logSetInput) {
     logSetInput.value = state.guide.setNumber;
     logSetInput.readOnly = true;
+  }
+  if (logForm) {
+    logForm.dataset.exerciseId = row.exercise_id;
+    logForm.dataset.setNumber = state.guide.setNumber;
   }
   prefillLogFields(row, state.guide.setNumber);
   if (submitBtn) submitBtn.disabled = !!state.guide.completed;
@@ -2228,8 +2237,9 @@ async function logSet(e) {
   }
   const form = e.target?.closest("form") || document.getElementById("logForm");
   const tpl = getCurrentTemplateForLogging();
-  const selectEl = document.getElementById("logExercise");
-  let exerciseIdRaw = selectEl ? selectEl.value : "";
+  const selectEl = form?.querySelector("#logExercise") || document.getElementById("logExercise");
+  const setInput = form?.querySelector("#logSet") || document.getElementById("logSet");
+  let exerciseIdRaw = form?.dataset?.exerciseId || (selectEl ? selectEl.value : "");
   if (!exerciseIdRaw) {
     // försök välja första övningen om inget valt
     if (tpl && selectEl && tpl.exercises?.length) {
@@ -2239,7 +2249,15 @@ async function logSet(e) {
     }
   }
   const exercise_id = exerciseIdRaw ? Number(exerciseIdRaw) : null;
-  const setNumber = state.guide ? state.guide.setNumber : Number(document.getElementById("logSet").value || 1);
+  const parseNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const setNumber =
+    parseNum(form?.dataset?.setNumber) ??
+    parseNum(setInput?.value) ??
+    parseNum(state.guide ? state.guide.setNumber : null) ??
+    1;
   const weightInput = form?.querySelector("#logWeight");
   const repsInput = form?.querySelector("#logReps");
   const rpeInput = form?.querySelector("#logRpe");
@@ -2273,7 +2291,10 @@ async function logSet(e) {
     const dbgReps = getPlannedValueForSet(plannedRow, "reps", payload.set_number);
     console.debug("[LOGSET]", {
       exerciseId: payload.exercise_id,
+      exerciseSource: exerciseIdRaw,
+      formExerciseDataset: form?.dataset?.exerciseId || "",
       setNumber: payload.set_number,
+      setInputValue: setInput?.value || "",
       inputWeight: weightInput?.value || "",
       inputReps: repsInput?.value || "",
       plannedWeight: dbgWeight,

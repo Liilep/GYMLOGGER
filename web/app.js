@@ -1814,6 +1814,17 @@ function getPlannedValueForSet(row, field, setNumber = 1) {
   return parts[idx];
 }
 
+function parseNumberValue(val) {
+  if (val === undefined || val === null) return null;
+  if (typeof val === "number" && Number.isFinite(val)) return val;
+  const str = String(val).trim();
+  if (!str) return null;
+  const normalized = str.replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+  if (!normalized || !normalized[0]) return null;
+  const num = Number(normalized[0]);
+  return Number.isFinite(num) ? num : null;
+}
+
 function getTemplateRowForExercise(exerciseId, tpl = getCurrentTemplateForLogging()) {
   if (!tpl) return null;
   return getSessionExerciseRows(tpl).find((r) => Number(r.exercise_id) === Number(exerciseId)) || null;
@@ -1934,11 +1945,15 @@ function prefillLogFields(row, setNumber = 1) {
   const repsEl = document.getElementById("logReps");
   const plannedWeight = getPlannedValueForSet(row, "planned_weight", setNumber);
   const plannedReps = getPlannedValueForSet(row, "reps", setNumber);
+  const parsedWeight = parseNumberValue(plannedWeight);
+  const parsedReps = parseNumberValue(plannedReps);
   if (weightEl && (setNumber <= 1 || !weightEl.value)) {
-    weightEl.value = plannedWeight;
+    const val = parsedWeight !== null ? parsedWeight : plannedWeight;
+    weightEl.value = val !== undefined && val !== null ? val : "";
   }
   if (repsEl && (setNumber <= 1 || !repsEl.value)) {
-    repsEl.value = plannedReps;
+    const val = parsedReps !== null ? parsedReps : plannedReps;
+    repsEl.value = val !== undefined && val !== null ? val : "";
   }
 }
 
@@ -2262,11 +2277,18 @@ async function logSet(e) {
   const repsInput = form?.querySelector("#logReps");
   const rpeInput = form?.querySelector("#logRpe");
   const commentInput = form?.querySelector("#logComment");
+  const plannedRow = tpl ? getTemplateRowForExercise(exercise_id, tpl) : null;
+  const plannedWeightRaw = getPlannedValueForSet(plannedRow, "planned_weight", setNumber);
+  const plannedRepsRaw = getPlannedValueForSet(plannedRow, "reps", setNumber);
+  const plannedWeightNum = parseNumberValue(plannedWeightRaw);
+  const plannedRepsNum = parseNumberValue(plannedRepsRaw);
+  const inputWeightNum = parseNumberValue(weightInput?.value);
+  const inputRepsNum = parseNumberValue(repsInput?.value);
   const payload = {
     exercise_id,
     set_number: setNumber,
-    weight: Number(weightInput?.value || 0),
-    reps: Number(repsInput?.value || 0),
+    weight: inputWeightNum ?? plannedWeightNum ?? 0,
+    reps: inputRepsNum ?? plannedRepsNum ?? 0,
     rpe: Number(rpeInput?.value || 0),
     comment: commentInput?.value || "",
   };
@@ -2299,6 +2321,8 @@ async function logSet(e) {
       inputReps: repsInput?.value || "",
       plannedWeight: dbgWeight,
       plannedReps: dbgReps,
+      parsedInputWeight: inputWeightNum,
+      parsedPlannedWeight: plannedWeightNum,
       loggedWeight: payload.weight,
       loggedReps: payload.reps,
     });
